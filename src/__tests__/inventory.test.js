@@ -145,6 +145,23 @@ describe('inventory — collectInventory shape', () => {
     const result = await collectInventory();
     assert.strictEqual(result.metadata.activeCharacter, null);
   });
+
+  it('metadata activeCharacter reflects non-zero characterId index', async () => {
+    const ctx = makeContext([makeCharacter('Aria'), makeCharacter('Lyra'), makeCharacter('Nova')]);
+    ctx.characterId = 2;
+    _ctxOverride = ctx;
+    const result = await collectInventory();
+    assert.equal(result.metadata.activeCharacter, 'Nova');
+  });
+
+  it('bots array still contains all characters regardless of active index', async () => {
+    const ctx = makeContext([makeCharacter('Aria'), makeCharacter('Lyra')]);
+    ctx.characterId = 1;
+    _ctxOverride = ctx;
+    const result = await collectInventory();
+    assert.equal(result.bots.length, 2, 'bots must contain all characters');
+    assert.equal(result.metadata.activeCharacter, 'Lyra', 'active derived from characterId');
+  });
 });
 
 // ---------------------------------------------------------------------------

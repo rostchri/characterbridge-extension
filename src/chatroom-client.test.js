@@ -392,13 +392,49 @@ describe('chatroom-client — packet sending (typed senders)', () => {
     assert.equal(p.image_b64, 'avatardata==');
   });
 
-  it('sendInventory uses ai_character field (not "bots")', async () => {
+  it('sendInventory uses ai_character field as singular Object (not array)', async () => {
     sendInventory({ bots: [{ name: 'Aria', avatar_b64: null, description: 'Test' }], personas: [], metadata: {} });
     await waitFor(() => serverReceived.some((f) => f.type === 'character_inventory'));
     const p = serverReceived.find((f) => f.type === 'character_inventory');
-    assert.ok(Array.isArray(p.ai_character), 'Must use ai_character field per spec');
-    assert.equal(p.ai_character[0].name, 'Aria');
+    assert.ok(p.ai_character !== null && typeof p.ai_character === 'object' && !Array.isArray(p.ai_character),
+      'ai_character must be a singular Object, not an array');
+    assert.equal(p.ai_character.name, 'Aria', 'ai_character.name must be the active character name');
     assert.equal(p.bots, undefined, 'bots field must NOT appear in wire format');
+  });
+
+  it('sendInventory resolves active character by metadata.activeCharacter', async () => {
+    sendInventory({
+      bots: [
+        { name: 'Aria', avatar_b64: null, description: 'A' },
+        { name: 'Lyra', avatar_b64: null, description: 'L' },
+      ],
+      personas: [],
+      metadata: { activeCharacter: 'Lyra' },
+    });
+    await waitFor(() => serverReceived.some((f) => f.type === 'character_inventory' && f.ai_character?.name === 'Lyra'));
+    const p = serverReceived.find((f) => f.type === 'character_inventory' && f.ai_character?.name === 'Lyra');
+    assert.equal(p.ai_character.name, 'Lyra', 'Must pick the character matching metadata.activeCharacter');
+  });
+
+  it('sendInventory falls back to bots[0] when no activeCharacter set', async () => {
+    sendInventory({
+      bots: [
+        { name: 'First', avatar_b64: null, description: '' },
+        { name: 'Second', avatar_b64: null, description: '' },
+      ],
+      personas: [],
+      metadata: {},
+    });
+    await waitFor(() => serverReceived.some((f) => f.type === 'character_inventory' && f.ai_character?.name === 'First'));
+    const p = serverReceived.find((f) => f.type === 'character_inventory' && f.ai_character?.name === 'First');
+    assert.equal(p.ai_character.name, 'First', 'Must fall back to bots[0] when no activeCharacter');
+  });
+
+  it('sendInventory sends null ai_character when bots list is empty', async () => {
+    sendInventory({ bots: [], personas: [], metadata: {} });
+    await waitFor(() => serverReceived.some((f) => f.type === 'character_inventory' && !f.ai_character));
+    const p = serverReceived.find((f) => f.type === 'character_inventory' && !f.ai_character);
+    assert.strictEqual(p.ai_character, null, 'ai_character must be null when no bots available');
   });
 
   it('sendInventoryUpdate sends inventory_update', async () => {
@@ -408,11 +444,13 @@ describe('chatroom-client — packet sending (typed senders)', () => {
     assert.equal(p.personas[0].name, 'User1');
   });
 
-  it('sendInventoryUpdate uses snake_case fields (ai_character, not bots)', async () => {
-    sendInventoryUpdate({ bots: [{ name: 'Bot1' }], personas: [], metadata: { activeCharacter: 'Bot1' } });
+  it('sendInventoryUpdate uses ai_character as singular Object (snake_case, not bots array)', async () => {
+    sendInventoryUpdate({ bots: [{ name: 'Bot1', avatar_b64: null, description: '' }], personas: [], metadata: { activeCharacter: 'Bot1' } });
     await waitFor(() => serverReceived.some((f) => f.type === 'inventory_update' && f.ai_character));
     const p = serverReceived.find((f) => f.type === 'inventory_update' && f.ai_character);
-    assert.ok(Array.isArray(p.ai_character), 'Must use ai_character (snake_case) in inventory_update');
+    assert.ok(!Array.isArray(p.ai_character), 'ai_character must NOT be an array');
+    assert.equal(typeof p.ai_character, 'object', 'ai_character must be an Object');
+    assert.equal(p.ai_character.name, 'Bot1', 'ai_character.name must match active character');
     assert.equal(p.bots, undefined, 'bots field must NOT appear in wire format');
   });
 

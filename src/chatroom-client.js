@@ -424,8 +424,30 @@ export function sendAvatar(charName, imageBase64) {
 }
 
 /**
+ * Resolves the active AI character from the bots array and metadata.
+ * Returns the bot whose name matches metadata.activeCharacter, or bots[0]
+ * as fallback, or null if no bots exist.
+ *
+ * @param {Array<{name: string, avatar_b64: string|null, description: string}>} bots
+ * @param {{activeCharacter?: string|null}} metadata
+ * @returns {{name: string, avatar_b64: string|null, description: string}|null}
+ */
+function resolveActiveCharacter(bots, metadata) {
+  const list = bots ?? [];
+  if (list.length === 0) return null;
+  if (metadata?.activeCharacter) {
+    const found = list.find((b) => b.name === metadata.activeCharacter);
+    if (found) return found;
+  }
+  return list[0];
+}
+
+/**
  * Sends the full character inventory on connect or when explicitly requested.
- * Spec field names: ai_character / personas (not bots/characters).
+ * Spec field names: ai_character (singular Object) / personas / metadata.
+ *
+ * ai_character is the *active* AI character as a single Object, not an array.
+ * Falls back to bots[0] when no active character is set.
  *
  * @param {{bots: Array, personas: Array, metadata: object}} inventory
  */
@@ -433,7 +455,7 @@ export function sendInventory(inventory) {
   const { bots, personas, metadata } = inventory;
   send({
     type: 'character_inventory',
-    ai_character: bots ?? [],
+    ai_character: resolveActiveCharacter(bots, metadata),
     personas: personas ?? [],
     metadata: metadata ?? {},
   });
@@ -442,13 +464,16 @@ export function sendInventory(inventory) {
 /**
  * Sends an incremental inventory update when the roster changes.
  *
+ * ai_character is the *active* AI character as a single Object, not an array.
+ * Falls back to bots[0] when no active character is set.
+ *
  * @param {{bots: Array, personas: Array, metadata: object}} inventory
  */
 export function sendInventoryUpdate(inventory) {
   const { bots, personas, metadata } = inventory;
   send({
     type: 'inventory_update',
-    ai_character: bots ?? [],
+    ai_character: resolveActiveCharacter(bots, metadata),
     personas: personas ?? [],
     metadata: metadata ?? {},
   });
