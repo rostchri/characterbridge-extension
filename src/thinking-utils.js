@@ -21,6 +21,31 @@ export function splitThinking(raw) {
 }
 
 /**
+ * Resolves the thinking/reasoning content for a chat message.
+ *
+ * Fallback chain (first non-empty string wins):
+ *  1. `splitThinking(mes)` — leading `<think>...</think>` tag in the message text.
+ *  2. `extra.reasoning`         — SillyTavern stores reasoning tokens here for some APIs
+ *                                  (e.g. Anthropic extended thinking, OpenAI o-series).
+ *  3. `extra.reasoning_content` — alternative key used by other ST API backends.
+ *
+ * @param {string|null|undefined} mes   - The raw message text (chat[i].mes).
+ * @param {object|null|undefined} extra - The message's extra object (chat[i].extra).
+ * @returns {{ thinking: string|null, visible: string }}
+ */
+export function resolveThinking(mes, extra) {
+  const split = splitThinking(mes);
+  if (split.thinking !== null) return split;
+
+  const fallback =
+    (typeof extra?.reasoning === 'string' && extra.reasoning.trim()) ||
+    (typeof extra?.reasoning_content === 'string' && extra.reasoning_content.trim()) ||
+    null;
+
+  return { thinking: fallback || null, visible: split.visible };
+}
+
+/**
  * Strips a still-open or already-closed `<think>...</think>` prefix from
  * cumulative streaming text so live token chunks never expose thinking content.
  *

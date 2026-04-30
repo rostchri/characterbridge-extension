@@ -1,9 +1,12 @@
 /**
- * thinking-split.test.js — Unit tests for splitThinking and stripThinkingPrefix
+ * thinking-split.test.js — Unit tests for splitThinking, stripThinkingPrefix
+ * and resolveThinking (#1820)
  *
  * Tests cover:
  *  - splitThinking: no tag, leading tag, tag with newlines, tag mid-text
  *  - stripThinkingPrefix: still-open tag, closed tag, no tag
+ *  - resolveThinking: <think> tag wins, extra.reasoning fallback,
+ *    extra.reasoning_content fallback, null when nothing present
  *
  * Run:
  *   cd /tmp/cb-fork/src && node --test __tests__/thinking-split.test.js
@@ -11,7 +14,7 @@
 
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { splitThinking, stripThinkingPrefix } from '../thinking-utils.js';
+import { splitThinking, stripThinkingPrefix, resolveThinking } from '../thinking-utils.js';
 
 // ---------------------------------------------------------------------------
 // splitThinking
@@ -136,5 +139,84 @@ describe('stripThinkingPrefix', () => {
   it('handles think block with newlines in streaming context', () => {
     const partial = '<think>\nplanning\n more planning\n</think>\nHello';
     assert.equal(stripThinkingPrefix(partial), 'Hello');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// resolveThinking (#1820)
+// ---------------------------------------------------------------------------
+
+describe('resolveThinking (#1820)', () => {
+
+  it('uses <think> tag when present — splitThinking result wins', () => {
+    const result = resolveThinking('<think>model reasoning</think>Answer here.', {});
+    assert.equal(result.thinking, 'model reasoning');
+    assert.equal(result.visible, 'Answer here.');
+  });
+
+  it('falls back to extra.reasoning when no <think> tag present', () => {
+    const result = resolveThinking('Answer without tag', { reasoning: 'hidden reasoning' });
+    assert.equal(result.thinking, 'hidden reasoning');
+    assert.equal(result.visible, 'Answer without tag');
+  });
+
+  it('falls back to extra.reasoning_content when extra.reasoning is absent', () => {
+    const result = resolveThinking('Visible reply', { reasoning_content: 'content-key reasoning' });
+    assert.equal(result.thinking, 'content-key reasoning');
+    assert.equal(result.visible, 'Visible reply');
+  });
+
+  it('returns thinking=null when no <think> tag and no extra reasoning keys', () => {
+    const result = resolveThinking('Plain message', {});
+    assert.equal(result.thinking, null);
+    assert.equal(result.visible, 'Plain message');
+  });
+
+  it('returns thinking=null when extra is null', () => {
+    const result = resolveThinking('Plain message', null);
+    assert.equal(result.thinking, null);
+    assert.equal(result.visible, 'Plain message');
+  });
+
+  it('returns thinking=null when extra is undefined', () => {
+    const result = resolveThinking('Plain message', undefined);
+    assert.equal(result.thinking, null);
+    assert.equal(result.visible, 'Plain message');
+  });
+
+  it('prefers <think> tag over extra.reasoning when both are present', () => {
+    const result = resolveThinking(
+      '<think>tag reasoning</think>Visible',
+      { reasoning: 'extra reasoning' },
+    );
+    assert.equal(result.thinking, 'tag reasoning');
+    assert.equal(result.visible, 'Visible');
+  });
+
+  it('prefers extra.reasoning over extra.reasoning_content when both present', () => {
+    const result = resolveThinking('Message', {
+      reasoning: 'primary',
+      reasoning_content: 'secondary',
+    });
+    assert.equal(result.thinking, 'primary');
+  });
+
+  it('treats empty-string extra.reasoning as absent and tries reasoning_content', () => {
+    const result = resolveThinking('Message', {
+      reasoning: '',
+      reasoning_content: 'fallback content',
+    });
+    assert.equal(result.thinking, 'fallback content');
+  });
+
+  it('treats whitespace-only extra.reasoning as absent', () => {
+    const result = resolveThinking('Message', { reasoning: '   ' });
+    assert.equal(result.thinking, null);
+  });
+
+  it('handles null mes gracefully', () => {
+    const result = resolveThinking(null, { reasoning: 'extra' });
+    assert.equal(result.thinking, 'extra');
+    assert.equal(result.visible, '');
   });
 });

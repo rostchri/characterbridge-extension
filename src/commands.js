@@ -57,7 +57,7 @@ import {
   scheduleExpressionUpdate,
   clearExpressionCache,
 } from './expression-relay.js';
-import { splitThinking, stripThinkingPrefix } from './thinking-utils.js';
+import { resolveThinking, stripThinkingPrefix } from './thinking-utils.js';
 
 // String fallback covers older ST versions that don't export this event type.
 const GROUP_WRAPPER_FINISHED =
@@ -172,7 +172,7 @@ export async function handleUserMessage(data) {
               msg.name === currentCharacterName
             ) {
               if (msg.mes?.trim()) {
-                const split = splitThinking(msg.mes.trim());
+                const split = resolveThinking(msg.mes.trim(), msg.extra);
                 thinkingText = split.thinking;
                 finalText = split.visible;
                 break;
@@ -211,7 +211,7 @@ export async function handleUserMessage(data) {
       const msg = chat[i];
       if (msg.is_user) break;
       if (msg.mes?.trim()) {
-        const split = splitThinking(msg.mes.trim());
+        const split = resolveThinking(msg.mes.trim(), msg.extra);
         aiMessages.unshift({
           name: msg.name || '',
           text: split.visible,
