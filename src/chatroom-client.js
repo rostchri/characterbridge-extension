@@ -656,6 +656,7 @@ export function sendChatStatePacket(payload) {
     character_avatar: payload.character_avatar ?? null,
     chat_file: payload.chat_file ?? null,
     group_id: payload.group_id ?? null,
+    active_persona_name: payload.active_persona_name ?? null,
   });
 }
 

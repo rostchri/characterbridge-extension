@@ -95,12 +95,24 @@ export function sendChatState() {
     const id = ctx.characterId;
     const char = id !== undefined ? ctx.characters?.[id] : undefined;
 
+    // Aktive Persona aus ST: powerUserSettings.user_avatar ist die ID/Filename,
+    // powerUserSettings.personas[id] ist der Display-Name. Fallback: name1 (ST's
+    // current user-name). Damit kann das Chatroom-Backend MemberState fuer
+    // joinende User vorbelegen — kein manueller Persona-Pick noetig.
+    const powerUser = ctx.powerUserSettings || {};
+    const userAvatarId = powerUser.user_avatar;
+    const personaName =
+      (userAvatarId && powerUser.personas?.[userAvatarId]) ??
+      ctx.name1 ??
+      null;
+
     const payload = {
       character_id: id !== undefined ? id : null,
       character_name: char?.name ?? null,
       character_avatar: char?.avatar ?? null,
       chat_file: char?.chat ?? null,
       group_id: ctx.groupId ?? null,
+      active_persona_name: personaName,
     };
 
     sendChatStatePacket(payload);
