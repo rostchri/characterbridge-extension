@@ -39,6 +39,8 @@ import {
   deleteLastMessage,
 } from "../../../../../script.js";
 
+import { saveResumeState } from './auto-resume.js';
+
 import { executeSlashCommandsWithOptions } from "../../../../../scripts/slash-commands.js";
 
 import { sharedState } from './state.js';
@@ -501,6 +503,9 @@ export async function handleExecuteCommand(data) {
         } catch (err) {
           console.warn('[CharacterBridge] saveChat/saveSettings vor reload fehlgeschlagen:', err);
         }
+        // Aktiven Character+Chat in localStorage sichern damit tryResume() nach
+        // dem Reload den Zustand wiederherstellen kann.
+        saveResumeState();
         replyText = "Reloading SillyTavern...";
         // Kurzer Delay damit der reply-Frame noch raus geht
         setTimeout(() => {

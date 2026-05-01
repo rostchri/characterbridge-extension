@@ -71,6 +71,17 @@ import {
   startInventoryWatcher,
   stopInventoryWatcher,
 } from './src/inventory.js';
+import { saveResumeState, tryResume } from './src/auto-resume.js';
+import { setupChatStateRelay, stopChatStateRelay } from './src/chat-state.js';
+import { eventSource, event_types } from '../../../../script.js';
+
+// ---------------------------------------------------------------------------
+// APP_READY: try to restore character+chat saved before last reload
+// ---------------------------------------------------------------------------
+
+// String fallback covers older ST versions that do not export APP_READY.
+const APP_READY_EVENT = event_types.APP_READY ?? 'app_ready';
+eventSource.on(APP_READY_EVENT, tryResume);
 
 // ---------------------------------------------------------------------------
 // Inbound packet router
@@ -154,6 +165,11 @@ onMessage(async (packet) => {
   }
 
   startInventoryWatcher((inventoryPayload) => sendInventoryUpdate(inventoryPayload));
+
+  // Start relaying chat-state changes to Chatroom (stops + restarts on
+  // each reconnect to avoid duplicate listeners across reconnect cycles).
+  stopChatStateRelay();
+  setupChatStateRelay();
 });
 
 // ---------------------------------------------------------------------------
