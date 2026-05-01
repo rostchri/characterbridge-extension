@@ -52,8 +52,10 @@ import {
   sendAiReply,
   sendUserMessageReply,
   sendErrorMessage,
+  sendChatHistoryResponse,
 } from './chatroom-client.js';
 import { sanitizeSlashArg, sanitizeChatArg } from './utils.js';
+import { computeHash } from './hash-utils.js';
 import { sendLastMessageImages, extractImageSrcsFromMesText } from './image-relay.js';
 import {
   startDelayedImageObserver,
@@ -663,6 +665,37 @@ export async function handleExecuteCommand(data) {
         }
         await executeSlashCommandsWithOptions(`/persona-set ${personaName}`);
         replyText = `Switched to persona "${personaName}".`;
+        break;
+      }
+
+      case "chat_history_request": {
+        const sinceRaw = data.args?.[0];
+        const sinceIndex = sinceRaw !== undefined && sinceRaw !== null
+          ? parseInt(sinceRaw, 10)
+          : null;
+        const hasSince = sinceIndex !== null && !Number.isNaN(sinceIndex);
+
+        const chatArr = SillyTavern.getContext().chat ?? [];
+
+        const messages = [];
+        for (let i = 0; i < chatArr.length; i++) {
+          if (hasSince && i < sinceIndex) continue;
+          const msg = chatArr[i];
+          if (!msg) continue;
+          const content = msg.mes ?? '';
+          const hash = await computeHash(content);
+          messages.push({
+            idx: i,
+            role: msg.is_user ? 'user' : 'assistant',
+            content,
+            name: msg.name ?? '',
+            hash,
+            extra: msg.extra ?? null,
+          });
+        }
+
+        sendChatHistoryResponse(data.chatId, messages, true);
+        replyText = `Sent ${messages.length} messages`;
         break;
       }
 
