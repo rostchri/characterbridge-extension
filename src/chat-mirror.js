@@ -39,7 +39,6 @@ import { eventSource, event_types } from '../../../../../script.js';
 import { sharedState } from './state.js';
 import { sendMessageChanged } from './chatroom-client.js';
 import { computeHash } from './hash-utils.js';
-export { computeHash } from './hash-utils.js';
 
 // ---------------------------------------------------------------------------
 // Constants
