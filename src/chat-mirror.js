@@ -84,7 +84,17 @@ async function _recheckTail() {
   const chat = ctx.chat;
   if (!Array.isArray(chat) || chat.length === 0) return;
 
-  const chatId = sharedState.lastActiveChatId;
+  // Iter-5b Fix: lastActiveChatId wird nur ueber Command-Pakete gesetzt.
+  // Bei reinem Hash-Polling ohne Commands bleibt es null → Backend skipt
+  // den Broadcast still wegen nil-Guard. Fallback auf Context-API +
+  // chat_metadata, damit der ST-Chat-Identifier in jedem Fall mitlaeuft.
+  const chatId =
+    sharedState.lastActiveChatId ??
+    (typeof ctx.getCurrentChatId === 'function' ? ctx.getCurrentChatId() : null) ??
+    ctx.chat_metadata?.chat_id ??
+    ctx.chat_metadata?.chatId ??
+    null;
+  if (!chatId) return;
   const startIdx = Math.max(0, chat.length - TAIL_LENGTH);
 
   for (let i = startIdx; i < chat.length; i++) {
