@@ -562,6 +562,28 @@ export function sendErrorMessage(text, chatId) {
   send({ type: 'error_message', text, chat_id: chatId ?? null });
 }
 
+/**
+ * Sends a chat_state packet reflecting the currently active character and chat.
+ *
+ * @param {{
+ *   character_id:     number|null,
+ *   character_name:   string|null,
+ *   character_avatar: string|null,
+ *   chat_file:        string|null,
+ *   group_id:         string|null,
+ * }} payload
+ */
+export function sendChatStatePacket(payload) {
+  send({
+    type: 'chat_state',
+    character_id: payload.character_id ?? null,
+    character_name: payload.character_name ?? null,
+    character_avatar: payload.character_avatar ?? null,
+    chat_file: payload.chat_file ?? null,
+    group_id: payload.group_id ?? null,
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Connection state accessor
 // ---------------------------------------------------------------------------
