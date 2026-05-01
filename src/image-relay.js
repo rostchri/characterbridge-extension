@@ -205,7 +205,7 @@ export function extractTextFromMesText(mesTextEl) {
  * @param {string[]} srcs
  * @returns {Promise<Array>}
  */
-async function collectImages(srcs) {
+export async function collectImages(srcs) {
   const results = await Promise.all(srcs.map(resolveImagePayload));
   return results.filter(Boolean);
 }

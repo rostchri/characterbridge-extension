@@ -51,7 +51,11 @@ import {
   sendErrorMessage,
 } from './chatroom-client.js';
 import { sanitizeSlashArg, sanitizeChatArg } from './utils.js';
-import { sendLastMessageImages } from './image-relay.js';
+import { sendLastMessageImages, extractImageSrcsFromMesText } from './image-relay.js';
+import {
+  startDelayedImageObserver,
+  stopDelayedImageObserver,
+} from './delayed-image-observer.js';
 import {
   resetExpressionSignature,
   scheduleExpressionUpdate,
@@ -227,9 +231,35 @@ export async function handleUserMessage(data) {
       sendErrorMessage('No response generated.', messageState.chatId);
     }
 
-    // Forward images from the last AI message (post-generation art, etc.)
+    // Forward images from the last AI message (post-generation art, etc.).
+    // After the initial send, start a MutationObserver on the .mes_text so
+    // images inserted later by auto-generation extensions are also forwarded.
+    const lastMesEl = (() => {
+      try {
+        const messages = document.querySelectorAll('#chat .mes');
+        if (!messages.length) return null;
+        const last = messages[messages.length - 1];
+        if (last.getAttribute('is_user') === 'true') return null;
+        return last.querySelector('.mes_text') || null;
+      } catch {
+        return null;
+      }
+    })();
+
+    // Collect srcs already in DOM right now so the observer only sends new ones.
+    const alreadySentSrcs = new Set(extractImageSrcsFromMesText(lastMesEl));
+
     sendLastMessageImages(messageState.chatId).catch((err) =>
-      console.warn("[CharacterBridge] sendLastMessageImages failed:", err),
+      console.warn('[CharacterBridge] sendLastMessageImages failed:', err),
+    );
+
+    // Resolve character name once for the observer packet.
+    const obsCharName = getActiveCharName();
+    startDelayedImageObserver(
+      lastMesEl,
+      messageState.chatId,
+      obsCharName,
+      alreadySentSrcs,
     );
   };
 
@@ -257,6 +287,10 @@ export async function handleUserMessage(data) {
       event_types.GENERATION_STOPPED,
       onGenerationStopped,
     );
+    // Stop any pending delayed-image observer when the session ends or a new
+    // user turn starts (MESSAGE_SENT triggers removeAllListeners indirectly via
+    // the next handleUserMessage call which calls stopDelayedImageObserver()).
+    stopDelayedImageObserver();
   };
 
   // Fires once per character turn. Closes their stream.
