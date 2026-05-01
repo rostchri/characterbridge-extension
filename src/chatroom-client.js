@@ -584,6 +584,59 @@ export function sendErrorMessage(text, chatId) {
 }
 
 /**
+ * Sends a chat_history_response packet to the Chatroom backend.
+ * Used by the plugin to fulfill a chat_history_request from Chatroom.
+ *
+ * @param {string} chatId
+ * @param {Array<{idx: number, role: 'user'|'assistant', content: string, name: string, hash: string, extra: object}>} messages
+ * @param {boolean} complete  true when the full (or filtered) list has been sent
+ */
+export function sendChatHistoryResponse(chatId, messages, complete) {
+  send({
+    type: 'chat_history_response',
+    chat_id: chatId,
+    messages,
+    complete,
+  });
+}
+
+/**
+ * Notifies Chatroom that a message was changed (edit, regen, or external update).
+ *
+ * @param {string} chatId
+ * @param {number} idx     Index into the ST chat array
+ * @param {string} content New message content (mes field)
+ * @param {string} hash    SHA-1 hex of content
+ * @param {string} role    'user' | 'assistant'
+ * @param {string} name    Speaker name
+ */
+export function sendMessageChanged(chatId, idx, content, hash, role, name) {
+  send({
+    type: 'message_changed',
+    chat_id: chatId,
+    idx,
+    content,
+    hash,
+    role,
+    name,
+  });
+}
+
+/**
+ * Notifies Chatroom that the user switched to a different chat.
+ *
+ * @param {string|null} oldChatId
+ * @param {string|null} newChatId
+ */
+export function sendChatSwitched(oldChatId, newChatId) {
+  send({
+    type: 'chat_switched',
+    old_chat_id: oldChatId,
+    new_chat_id: newChatId,
+  });
+}
+
+/**
  * Sends a chat_state packet reflecting the currently active character and chat.
  *
  * @param {{

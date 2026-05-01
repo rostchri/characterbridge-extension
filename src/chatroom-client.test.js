@@ -75,6 +75,9 @@ import {
   sendInventory,
   sendInventoryUpdate,
   sendTypingAction,
+  sendChatHistoryResponse,
+  sendMessageChanged,
+  sendChatSwitched,
   isConnected,
   _getSocket,
   _isAuthenticated,
@@ -727,6 +730,136 @@ describe('chatroom-client — sendStreamEndWithContext thinking_duration_ms', ()
       await waitFor(() => serverReceived.some((f) => f.type === 'stream_end' && f.stream_id === 'sid-null-dur'));
       const p = serverReceived.find((f) => f.type === 'stream_end' && f.stream_id === 'sid-null-dur');
       assert.strictEqual(p.thinking_duration_ms, null);
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+
+describe('chatroom-client — Iter-5 source-of-truth senders', () => {
+
+  afterEach(() => { _resetForTest(); });
+
+  it('sendChatHistoryResponse sends chat_history_response with correct fields', async () => {
+    await withServer('test-dummy', async (srv) => {
+      const serverReceived = [];
+      srv.wss.once('connection', (ws) => {
+        ws.once('message', () => ws.send(JSON.stringify({ type: 'auth_ok' })));
+        ws.on('message', (data) => serverReceived.push(JSON.parse(data.toString())));
+      });
+      connect();
+      await waitFor(() => isConnected());
+
+      const messages = [
+        { idx: 0, role: 'user',      content: 'Hello', name: 'User', hash: 'abc123', extra: null },
+        { idx: 1, role: 'assistant', content: 'Hi!',   name: 'Aria', hash: 'def456', extra: null },
+      ];
+      sendChatHistoryResponse('chat-42', messages, true);
+      await waitFor(() => serverReceived.some((f) => f.type === 'chat_history_response'));
+      const p = serverReceived.find((f) => f.type === 'chat_history_response');
+
+      assert.equal(p.chat_id, 'chat-42', 'chat_id must be forwarded');
+      assert.equal(p.messages.length, 2, 'messages array length must match');
+      assert.equal(p.messages[0].idx, 0, 'idx must be preserved');
+      assert.equal(p.messages[0].role, 'user', 'role must be preserved');
+      assert.equal(p.messages[1].name, 'Aria', 'name must be preserved');
+      assert.strictEqual(p.complete, true, 'complete must be true');
+    });
+  });
+
+  it('sendChatHistoryResponse with complete=false is forwarded correctly', async () => {
+    await withServer('test-dummy', async (srv) => {
+      const serverReceived = [];
+      srv.wss.once('connection', (ws) => {
+        ws.once('message', () => ws.send(JSON.stringify({ type: 'auth_ok' })));
+        ws.on('message', (data) => serverReceived.push(JSON.parse(data.toString())));
+      });
+      connect();
+      await waitFor(() => isConnected());
+
+      sendChatHistoryResponse('chat-x', [], false);
+      await waitFor(() => serverReceived.some((f) => f.type === 'chat_history_response'));
+      const p = serverReceived.find((f) => f.type === 'chat_history_response');
+      assert.strictEqual(p.complete, false, 'complete=false must be forwarded');
+      assert.deepEqual(p.messages, [], 'empty messages array must be forwarded');
+    });
+  });
+
+  it('sendMessageChanged sends message_changed with all required fields', async () => {
+    await withServer('test-dummy', async (srv) => {
+      const serverReceived = [];
+      srv.wss.once('connection', (ws) => {
+        ws.once('message', () => ws.send(JSON.stringify({ type: 'auth_ok' })));
+        ws.on('message', (data) => serverReceived.push(JSON.parse(data.toString())));
+      });
+      connect();
+      await waitFor(() => isConnected());
+
+      sendMessageChanged('chat-7', 3, 'Updated message', 'a1b2c3d4', 'assistant', 'Aria');
+      await waitFor(() => serverReceived.some((f) => f.type === 'message_changed'));
+      const p = serverReceived.find((f) => f.type === 'message_changed');
+
+      assert.equal(p.chat_id,  'chat-7',          'chat_id must be forwarded');
+      assert.equal(p.idx,      3,                 'idx must be forwarded');
+      assert.equal(p.content,  'Updated message', 'content must be forwarded');
+      assert.equal(p.hash,     'a1b2c3d4',        'hash must be forwarded');
+      assert.equal(p.role,     'assistant',        'role must be forwarded');
+      assert.equal(p.name,     'Aria',             'name must be forwarded');
+    });
+  });
+
+  it('sendMessageChanged with role=user is forwarded correctly', async () => {
+    await withServer('test-dummy', async (srv) => {
+      const serverReceived = [];
+      srv.wss.once('connection', (ws) => {
+        ws.once('message', () => ws.send(JSON.stringify({ type: 'auth_ok' })));
+        ws.on('message', (data) => serverReceived.push(JSON.parse(data.toString())));
+      });
+      connect();
+      await waitFor(() => isConnected());
+
+      sendMessageChanged('chat-8', 0, 'User text', 'hash99', 'user', 'UserX');
+      await waitFor(() => serverReceived.some((f) => f.type === 'message_changed' && f.role === 'user'));
+      const p = serverReceived.find((f) => f.type === 'message_changed' && f.role === 'user');
+      assert.equal(p.role, 'user', 'role=user must be forwarded');
+      assert.equal(p.name, 'UserX', 'user name must be forwarded');
+    });
+  });
+
+  it('sendChatSwitched sends chat_switched with old and new chat ids', async () => {
+    await withServer('test-dummy', async (srv) => {
+      const serverReceived = [];
+      srv.wss.once('connection', (ws) => {
+        ws.once('message', () => ws.send(JSON.stringify({ type: 'auth_ok' })));
+        ws.on('message', (data) => serverReceived.push(JSON.parse(data.toString())));
+      });
+      connect();
+      await waitFor(() => isConnected());
+
+      sendChatSwitched('old-chat-id', 'new-chat-id');
+      await waitFor(() => serverReceived.some((f) => f.type === 'chat_switched'));
+      const p = serverReceived.find((f) => f.type === 'chat_switched');
+
+      assert.equal(p.old_chat_id, 'old-chat-id', 'old_chat_id must be forwarded');
+      assert.equal(p.new_chat_id, 'new-chat-id', 'new_chat_id must be forwarded');
+    });
+  });
+
+  it('sendChatSwitched forwards null old_chat_id for first-connect scenario', async () => {
+    await withServer('test-dummy', async (srv) => {
+      const serverReceived = [];
+      srv.wss.once('connection', (ws) => {
+        ws.once('message', () => ws.send(JSON.stringify({ type: 'auth_ok' })));
+        ws.on('message', (data) => serverReceived.push(JSON.parse(data.toString())));
+      });
+      connect();
+      await waitFor(() => isConnected());
+
+      sendChatSwitched(null, 'first-chat');
+      await waitFor(() => serverReceived.some((f) => f.type === 'chat_switched'));
+      const p = serverReceived.find((f) => f.type === 'chat_switched');
+      assert.strictEqual(p.old_chat_id, null, 'old_chat_id=null must be preserved');
+      assert.equal(p.new_chat_id, 'first-chat');
     });
   });
 });
