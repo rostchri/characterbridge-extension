@@ -5,7 +5,8 @@
  *   - reload-command triggert window.location.reload() mit setTimeout-Delay
  *   - Vor reload wird saveChat aufgerufen wenn vorhanden
  *   - Wenn saveChat fehlt: kein Crash
- *   - replyText korrekt gesetzt (sendUserMessageReply erhalt "Reloading SillyTavern...")
+ *   - replyText bleibt null — kein "Reloading SillyTavern..." in der Bridge
+ *   - console.debug wird mit dem erwarteten Prefix aufgerufen
  *
  * Run from repo root:
  *   node --test src/__tests__/reload-command.test.js
@@ -49,12 +50,6 @@ globalThis.eventSource = { on: () => {}, removeListener: () => {} };
 // ST-Modul-Stubs — alle Imports aus script.js und slash-commands.js
 // ---------------------------------------------------------------------------
 
-// commands.js importiert aus "../../../../../script.js" — wir brauchen einen
-// virtuellen Resolver. Node.js --experimental-vm-modules wuerde helfen, aber
-// da der Test-Runner keinen Mock-Resolver unterstuetzt, shimen wir alle
-// verwendeten Globals direkt und lassen commands.js via dynamischem Import
-// nach dem Shim-Aufbau laden.
-
 // event_types shim
 globalThis.event_types = {
   STREAM_TOKEN_RECEIVED: 'stream_token',
@@ -64,36 +59,23 @@ globalThis.event_types = {
   GROUP_WRAPPER_FINISHED: 'group_wrapper_finished',
 };
 
-// Stubs fuer alle named exports aus script.js und slash-commands.js
-// (commands.js importiert diese statisch — wir koennen sie nicht mocken,
-// aber handleExecuteCommand nutzt nur SillyTavern.getContext() fuer "reload",
-// also ist kein echtes ST-API notig fuer diesen case)
-
 // ---------------------------------------------------------------------------
-// Wir testen handleExecuteCommand isoliert durch direktes Aufrufen der
-// exportierten Funktion. Da commands.js Browser-Module-Pfade hat, muessen
-// wir die Funktion aus der Testperspektive via in-process-Simulation pruefen.
+// Extrahierte reload-Logik (identisch mit dem Case in handleExecuteCommand).
+// Muss 1:1 mit dem Produktionscode uebereinstimmen.
 //
-// Strategie: Die reload-Logik ist minimal (saveChat + setTimeout + reload).
-// Wir testen sie als eigenstaendige Einheit durch Extraktion der Kernlogik
-// in einem Test-Helper — analog zu wie inventory.test.js collectInventory
-// direkt testet.
-//
-// Da commands.js nicht isoliert importierbar ist (ST-spezifische static
-// imports), extrahieren wir die reload-Logik in eine testbare Hilfsfunktion
-// und testen diese direkt.
+// WICHTIG: kein replyText — console.debug statt Bubble.
 // ---------------------------------------------------------------------------
 
 /**
  * Extrahierte reload-Logik identisch mit dem Case in handleExecuteCommand.
- * Muss 1:1 mit dem Produktionscode uebereinstimmen.
  *
  * @param {object} context - SillyTavern.getContext() Ergebnis
  * @param {Function} scheduleReload - Abstrahiert setTimeout(reload, 200)
- * @returns {string} replyText
+ * @param {Function} [debugLog] - Ueberschreibbar fuer Test-Verifikation
+ * @returns {null} replyText ist immer null (kein Chatroom-Feedback)
  */
-async function executeReloadCommand(context, scheduleReload) {
-  let replyText;
+async function executeReloadCommand(context, scheduleReload, debugLog = console.debug) {
+  let replyText = null;
   try {
     if (typeof context.saveChat === 'function') {
       await context.saveChat();
@@ -104,7 +86,8 @@ async function executeReloadCommand(context, scheduleReload) {
   } catch (err) {
     console.warn('[CharacterBridge] saveChat/saveSettings vor reload fehlgeschlagen:', err);
   }
-  replyText = 'Reloading SillyTavern...';
+  debugLog('[CharacterBridge] reload command received — saving state and reloading');
+  // kein replyText — replyText bleibt der initialisierte Default-Wert
   scheduleReload();
   return replyText;
 }
@@ -113,13 +96,28 @@ async function executeReloadCommand(context, scheduleReload) {
 // Tests
 // ---------------------------------------------------------------------------
 
-describe('reload command — replyText', () => {
+describe('reload command — kein replyText (nur console.debug)', () => {
 
-  it('setzt replyText auf "Reloading SillyTavern..."', async () => {
+  it('gibt null zurueck (kein Chatroom-Bubble)', async () => {
     const ctx = {};
+    const replyText = await executeReloadCommand(ctx, () => {});
+    assert.strictEqual(replyText, null, 'replyText muss null sein — keine Bubble im Chatroom');
+  });
+
+  it('loggt die erwartete console.debug-Meldung', async () => {
+    const logs = [];
+    const debugLog = (...args) => { logs.push(args.join(' ')); };
+    const ctx = {};
+    await executeReloadCommand(ctx, () => {}, debugLog);
+    assert.ok(
+      logs.some((m) => m.includes('[CharacterBridge] reload command received')),
+      'console.debug muss die Reload-Meldung enthalten',
+    );
+  });
+
+  it('scheduleReload wird aufgerufen', async () => {
     let scheduled = false;
-    const replyText = await executeReloadCommand(ctx, () => { scheduled = true; });
-    assert.equal(replyText, 'Reloading SillyTavern...');
+    await executeReloadCommand({}, () => { scheduled = true; });
     assert.ok(scheduled, 'scheduleReload muss aufgerufen worden sein');
   });
 });
@@ -217,7 +215,7 @@ describe('reload command — kein Crash wenn saveChat fehlt', () => {
     await assert.doesNotReject(async () => {
       replyText = await executeReloadCommand(ctx, () => {});
     });
-    assert.equal(replyText, 'Reloading SillyTavern...');
+    assert.strictEqual(replyText, null);
   });
 
   it('kein Crash wenn saveChat fehlt aber saveSettingsDebounced vorhanden', async () => {
@@ -229,7 +227,7 @@ describe('reload command — kein Crash wenn saveChat fehlt', () => {
     await assert.doesNotReject(async () => {
       replyText = await executeReloadCommand(ctx, () => {});
     });
-    assert.equal(replyText, 'Reloading SillyTavern...');
+    assert.strictEqual(replyText, null);
     assert.ok(settingsSaved);
   });
 
@@ -242,11 +240,11 @@ describe('reload command — kein Crash wenn saveChat fehlt', () => {
     await assert.doesNotReject(async () => {
       replyText = await executeReloadCommand(ctx, () => {});
     });
-    assert.equal(replyText, 'Reloading SillyTavern...');
+    assert.strictEqual(replyText, null);
     assert.ok(chatSaved);
   });
 
-  it('saveChat-Fehler werden abgefangen — kein Crash, replyText korrekt', async () => {
+  it('saveChat-Fehler werden abgefangen — kein Crash, replyText null', async () => {
     const ctx = {
       saveChat: async () => { throw new Error('ST-Netzwerkfehler'); },
     };
@@ -254,8 +252,8 @@ describe('reload command — kein Crash wenn saveChat fehlt', () => {
     await assert.doesNotReject(async () => {
       replyText = await executeReloadCommand(ctx, () => {});
     });
-    assert.equal(replyText, 'Reloading SillyTavern...',
-      'replyText muss auch nach saveChat-Fehler korrekt sein');
+    assert.strictEqual(replyText, null,
+      'replyText muss null bleiben auch nach saveChat-Fehler');
   });
 
   it('saveSettingsDebounced-Fehler werden abgefangen — kein Crash', async () => {
@@ -266,7 +264,7 @@ describe('reload command — kein Crash wenn saveChat fehlt', () => {
     await assert.doesNotReject(async () => {
       replyText = await executeReloadCommand(ctx, () => {});
     });
-    assert.equal(replyText, 'Reloading SillyTavern...');
+    assert.strictEqual(replyText, null);
   });
 });
 
