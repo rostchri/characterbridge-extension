@@ -509,7 +509,8 @@ export function sendStreamChunkWithContext(streamId, delta, charName, chatId) {
 }
 
 /**
- * Signals the end of a streaming turn, including optional thinking content.
+ * Signals the end of a streaming turn, including optional thinking content
+ * and any VisualBeat prompts extracted from the AI reply.
  * finalText MUST be preserved as null when the AI produced no text.
  *
  * @param {string} streamId
@@ -518,8 +519,9 @@ export function sendStreamChunkWithContext(streamId, delta, charName, chatId) {
  * @param {string|null} chatId
  * @param {string|null} [thinking]
  * @param {number|null} [thinkingDurationMs]  Duration of the reasoning phase in milliseconds, or null.
+ * @param {string[]}    [visualBeats]         Extracted <pic prompt="..."> strings, or empty array.
  */
-export function sendStreamEndWithContext(streamId, finalText, charName, chatId, thinking, thinkingDurationMs) {
+export function sendStreamEndWithContext(streamId, finalText, charName, chatId, thinking, thinkingDurationMs, visualBeats) {
   send({
     type: 'stream_end',
     stream_id: streamId,
@@ -528,14 +530,16 @@ export function sendStreamEndWithContext(streamId, finalText, charName, chatId, 
     chat_id: chatId ?? null,
     thinking: thinking ?? null,
     thinking_duration_ms: thinkingDurationMs ?? null,
+    visual_beats: visualBeats ?? [],
   });
 }
 
 /**
  * Sends a multi-message AI reply (e.g. after a group turn).
- * Each message object may contain a `thinking_duration_ms` field (number|null).
+ * Each message object may contain a `thinking_duration_ms` field (number|null)
+ * and a `visual_beats` field (string[]).
  *
- * @param {Array<{name: string, text: string, thinking: string|null, thinking_duration_ms: number|null, charName: string|null}>} messages
+ * @param {Array<{name: string, text: string, thinking: string|null, thinking_duration_ms: number|null, charName: string|null, visual_beats?: string[]}>} messages
  * @param {string|null} charName  Active character at the time of reply.
  * @param {string|null} chatId
  */

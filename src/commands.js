@@ -62,6 +62,7 @@ import {
   clearExpressionCache,
 } from './expression-relay.js';
 import { resolveThinking, stripThinkingPrefix } from './thinking-utils.js';
+import { extractAndStripVisualBeats } from './visual-beats.js';
 
 // String fallback covers older ST versions that don't export this event type.
 const GROUP_WRAPPER_FINISHED =
@@ -193,13 +194,21 @@ export async function handleUserMessage(data) {
         );
       }
 
+      // Extract VisualBeat tags from the final visible text before sending.
+      // The clean text (without pic-tags) becomes the wire finalText;
+      // the extracted prompt strings travel as a separate visual_beats array.
+      const { cleanText: cleanFinalText, beats: visualBeats } =
+        extractAndStripVisualBeats(finalText ?? '');
+      const wireFinalText = finalText !== null ? cleanFinalText : null;
+
       sendStreamEndWithContext(
         currentStreamId,
-        finalText,
+        wireFinalText,
         charName,
         messageState.chatId,
         thinkingText,
         thinkingDurationMs,
+        visualBeats,
       );
     }
     messageState.isStreaming = false;
@@ -219,12 +228,14 @@ export async function handleUserMessage(data) {
       if (msg.is_user) break;
       if (msg.mes?.trim()) {
         const split = resolveThinking(msg.mes.trim(), msg.extra);
+        const { cleanText, beats } = extractAndStripVisualBeats(split.visible);
         aiMessages.unshift({
           name: msg.name || '',
-          text: split.visible,
+          text: cleanText,
           thinking: split.thinking,
           thinking_duration_ms: split.durationMs,
           charName: msg.name || getActiveCharName(),
+          visual_beats: beats,
         });
       }
     }
