@@ -517,8 +517,9 @@ export function sendStreamChunkWithContext(streamId, delta, charName, chatId) {
  * @param {string|null} charName
  * @param {string|null} chatId
  * @param {string|null} [thinking]
+ * @param {number|null} [thinkingDurationMs]  Duration of the reasoning phase in milliseconds, or null.
  */
-export function sendStreamEndWithContext(streamId, finalText, charName, chatId, thinking) {
+export function sendStreamEndWithContext(streamId, finalText, charName, chatId, thinking, thinkingDurationMs) {
   send({
     type: 'stream_end',
     stream_id: streamId,
@@ -526,13 +527,15 @@ export function sendStreamEndWithContext(streamId, finalText, charName, chatId, 
     char_name: charName ?? null,
     chat_id: chatId ?? null,
     thinking: thinking ?? null,
+    thinking_duration_ms: thinkingDurationMs ?? null,
   });
 }
 
 /**
  * Sends a multi-message AI reply (e.g. after a group turn).
+ * Each message object may contain a `thinking_duration_ms` field (number|null).
  *
- * @param {Array<{name: string, text: string, thinking: string|null, charName: string|null}>} messages
+ * @param {Array<{name: string, text: string, thinking: string|null, thinking_duration_ms: number|null, charName: string|null}>} messages
  * @param {string|null} charName  Active character at the time of reply.
  * @param {string|null} chatId
  */

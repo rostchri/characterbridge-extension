@@ -164,6 +164,7 @@ export async function handleUserMessage(data) {
       // ST applies sentence-completion trimming to mes after generation ends.
       let finalText = null;
       let thinkingText = null;
+      let thinkingDurationMs = null;
       try {
         const { chat } = SillyTavern.getContext();
         if (chat?.length) {
@@ -178,6 +179,7 @@ export async function handleUserMessage(data) {
               if (msg.mes?.trim()) {
                 const split = resolveThinking(msg.mes.trim(), msg.extra);
                 thinkingText = split.thinking;
+                thinkingDurationMs = split.durationMs;
                 finalText = split.visible;
                 break;
               }
@@ -197,6 +199,7 @@ export async function handleUserMessage(data) {
         charName,
         messageState.chatId,
         thinkingText,
+        thinkingDurationMs,
       );
     }
     messageState.isStreaming = false;
@@ -220,6 +223,7 @@ export async function handleUserMessage(data) {
           name: msg.name || '',
           text: split.visible,
           thinking: split.thinking,
+          thinking_duration_ms: split.durationMs,
           charName: msg.name || getActiveCharName(),
         });
       }

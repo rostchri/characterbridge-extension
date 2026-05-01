@@ -68,6 +68,7 @@ import {
   send,
   sendStreamEnd,
   sendStreamChunk,
+  sendStreamEndWithContext,
   sendUserMessageReply,
   sendExpression,
   sendAvatar,
@@ -473,6 +474,7 @@ describe('chatroom-client — packet sending (typed senders)', () => {
     // After reset, _authenticated is false — send() must not throw
     assert.doesNotThrow(() => send({ type: 'test' }));
   });
+
 });
 
 // ---------------------------------------------------------------------------
@@ -662,5 +664,69 @@ describe('chatroom-client — backoff monotonicity (#1817)', () => {
     let d = BACKOFF_INITIAL_MS;
     for (let i = 0; i < 20; i++) d = Math.min(d * 2, BACKOFF_MAX_MS);
     assert.equal(d, BACKOFF_MAX_MS, 'Backoff must cap at BACKOFF_MAX_MS');
+  });
+});
+
+// ---------------------------------------------------------------------------
+
+describe('chatroom-client — sendStreamEndWithContext thinking_duration_ms', () => {
+
+  afterEach(() => { _resetForTest(); });
+
+  it('includes thinking_duration_ms in stream_end packet body', async () => {
+    await withServer('test-dummy', async (srv) => {
+      const serverReceived = [];
+      srv.wss.once('connection', (ws) => {
+        ws.once('message', () => ws.send(JSON.stringify({ type: 'auth_ok' })));
+        ws.on('message', (data) => serverReceived.push(JSON.parse(data.toString())));
+      });
+
+      connect();
+      await waitFor(() => isConnected());
+
+      sendStreamEndWithContext('sid-dur', 'Final text.', 'Aria', 'chat-1', 'I thought...', 3500);
+      await waitFor(() => serverReceived.some((f) => f.type === 'stream_end' && f.stream_id === 'sid-dur'));
+      const p = serverReceived.find((f) => f.type === 'stream_end' && f.stream_id === 'sid-dur');
+      assert.equal(p.final_text, 'Final text.');
+      assert.equal(p.thinking, 'I thought...');
+      assert.equal(p.thinking_duration_ms, 3500);
+      assert.equal(p.chat_id, 'chat-1');
+    });
+  });
+
+  it('sends thinking_duration_ms=null when thinkingDurationMs is undefined', async () => {
+    await withServer('test-dummy', async (srv) => {
+      const serverReceived = [];
+      srv.wss.once('connection', (ws) => {
+        ws.once('message', () => ws.send(JSON.stringify({ type: 'auth_ok' })));
+        ws.on('message', (data) => serverReceived.push(JSON.parse(data.toString())));
+      });
+
+      connect();
+      await waitFor(() => isConnected());
+
+      sendStreamEndWithContext('sid-no-dur', 'Text.', 'Aria', 'chat-1', 'thought', undefined);
+      await waitFor(() => serverReceived.some((f) => f.type === 'stream_end' && f.stream_id === 'sid-no-dur'));
+      const p = serverReceived.find((f) => f.type === 'stream_end' && f.stream_id === 'sid-no-dur');
+      assert.strictEqual(p.thinking_duration_ms, null, 'thinking_duration_ms must be null when not provided');
+    });
+  });
+
+  it('sends thinking_duration_ms=null when null passed explicitly', async () => {
+    await withServer('test-dummy', async (srv) => {
+      const serverReceived = [];
+      srv.wss.once('connection', (ws) => {
+        ws.once('message', () => ws.send(JSON.stringify({ type: 'auth_ok' })));
+        ws.on('message', (data) => serverReceived.push(JSON.parse(data.toString())));
+      });
+
+      connect();
+      await waitFor(() => isConnected());
+
+      sendStreamEndWithContext('sid-null-dur', 'Text.', 'Aria', 'chat-1', null, null);
+      await waitFor(() => serverReceived.some((f) => f.type === 'stream_end' && f.stream_id === 'sid-null-dur'));
+      const p = serverReceived.find((f) => f.type === 'stream_end' && f.stream_id === 'sid-null-dur');
+      assert.strictEqual(p.thinking_duration_ms, null);
+    });
   });
 });

@@ -219,4 +219,61 @@ describe('resolveThinking (#1820)', () => {
     assert.equal(result.thinking, 'extra');
     assert.equal(result.visible, '');
   });
+
+  // durationMs resolution
+  it('returns durationMs=null when <think> tag path is taken (inline tag, no wall-clock)', () => {
+    const result = resolveThinking('<think>reasoning</think>Answer', {
+      reasoning_duration: 3.5,
+      reasoning_duration_ms: 3500,
+    });
+    assert.equal(result.durationMs, null, 'durationMs must be null for <think> tag path');
+  });
+
+  it('uses extra.reasoning_duration_ms directly when present', () => {
+    const result = resolveThinking('Answer', { reasoning_duration_ms: 4200 });
+    assert.equal(result.durationMs, 4200);
+  });
+
+  it('converts extra.reasoning_duration (seconds) to milliseconds', () => {
+    const result = resolveThinking('Answer', { reasoning_duration: 3.5 });
+    assert.equal(result.durationMs, 3500);
+  });
+
+  it('prefers reasoning_duration_ms over reasoning_duration when both present', () => {
+    const result = resolveThinking('Answer', {
+      reasoning_duration_ms: 4200,
+      reasoning_duration: 3.5,
+    });
+    assert.equal(result.durationMs, 4200, 'reasoning_duration_ms takes priority');
+  });
+
+  it('returns durationMs=null when neither duration field is present', () => {
+    const result = resolveThinking('Answer', { reasoning: 'some thinking' });
+    assert.equal(result.durationMs, null);
+  });
+
+  it('returns durationMs=null when extra is null', () => {
+    const result = resolveThinking('Answer', null);
+    assert.equal(result.durationMs, null);
+  });
+
+  it('returns durationMs=null when extra is undefined', () => {
+    const result = resolveThinking('Answer', undefined);
+    assert.equal(result.durationMs, null);
+  });
+
+  it('ignores non-finite reasoning_duration_ms values', () => {
+    const result = resolveThinking('Answer', { reasoning_duration_ms: NaN });
+    assert.equal(result.durationMs, null);
+  });
+
+  it('ignores non-finite reasoning_duration values', () => {
+    const result = resolveThinking('Answer', { reasoning_duration: Infinity });
+    assert.equal(result.durationMs, null);
+  });
+
+  it('handles reasoning_duration=0 correctly (zero seconds → 0 ms)', () => {
+    const result = resolveThinking('Answer', { reasoning_duration: 0 });
+    assert.equal(result.durationMs, 0);
+  });
 });
