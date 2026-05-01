@@ -489,6 +489,30 @@ export async function handleExecuteCommand(data) {
         break;
       }
 
+      case "reload": {
+        // Sicherstellen dass der aktuelle Chat-State persistiert ist bevor reload
+        try {
+          if (typeof context.saveChat === 'function') {
+            await context.saveChat();
+          }
+          if (typeof context.saveSettingsDebounced === 'function') {
+            context.saveSettingsDebounced();
+          }
+        } catch (err) {
+          console.warn('[CharacterBridge] saveChat/saveSettings vor reload fehlgeschlagen:', err);
+        }
+        replyText = "Reloading SillyTavern...";
+        // Kurzer Delay damit der reply-Frame noch raus geht
+        setTimeout(() => {
+          try {
+            window.location.reload();
+          } catch (err) {
+            console.error('[CharacterBridge] window.location.reload fehlgeschlagen:', err);
+          }
+        }, 200);
+        break;
+      }
+
       default:
         replyText = `Unknown command: ${data.command}`;
     }
