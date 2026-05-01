@@ -368,32 +368,35 @@ describe('chatroom-client — packet sending (typed senders)', () => {
     assert.equal(p.final_text, 'Final answer.');
   });
 
-  it('sendExpression sends expression_update', async () => {
-    sendExpression('Aria', 'happy', 'base64data==');
+  it('sendExpression sends expression_update with image_url', async () => {
+    sendExpression('Aria', 'happy', 'https://st.example.com/sprites/happy.png');
     await waitFor(() => serverReceived.some((f) => f.type === 'expression_update'));
     const p = serverReceived.find((f) => f.type === 'expression_update');
     assert.equal(p.char_name, 'Aria');
     assert.equal(p.emotion, 'happy');
-    assert.equal(p.image_b64, 'base64data==');
+    assert.equal(p.image_url, 'https://st.example.com/sprites/happy.png');
+    assert.equal(p.image_b64, undefined, 'image_b64 must not appear in wire format');
   });
 
-  it('sendExpression uses null image when none provided', async () => {
+  it('sendExpression uses null image_url when none provided', async () => {
     sendExpression('Aria', 'neutral', null);
     await waitFor(() => serverReceived.some((f) => f.type === 'expression_update' && f.emotion === 'neutral'));
     const p = serverReceived.find((f) => f.type === 'expression_update' && f.emotion === 'neutral');
-    assert.strictEqual(p.image_b64, null);
+    assert.strictEqual(p.image_url, null);
+    assert.equal(p.image_b64, undefined, 'image_b64 must not appear in wire format');
   });
 
-  it('sendAvatar sends avatar_update', async () => {
-    sendAvatar('Aria', 'avatardata==');
+  it('sendAvatar sends avatar_update with image_url', async () => {
+    sendAvatar('Aria', 'https://st.example.com/thumbnail?type=avatar&file=Aria.png');
     await waitFor(() => serverReceived.some((f) => f.type === 'avatar_update'));
     const p = serverReceived.find((f) => f.type === 'avatar_update');
     assert.equal(p.char_name, 'Aria');
-    assert.equal(p.image_b64, 'avatardata==');
+    assert.equal(p.image_url, 'https://st.example.com/thumbnail?type=avatar&file=Aria.png');
+    assert.equal(p.image_b64, undefined, 'image_b64 must not appear in wire format');
   });
 
   it('sendInventory uses ai_character field as singular Object (not array)', async () => {
-    sendInventory({ bots: [{ name: 'Aria', avatar_b64: null, description: 'Test' }], personas: [], metadata: {} });
+    sendInventory({ bots: [{ name: 'Aria', avatar_url: null, description: 'Test' }], personas: [], metadata: {} });
     await waitFor(() => serverReceived.some((f) => f.type === 'character_inventory'));
     const p = serverReceived.find((f) => f.type === 'character_inventory');
     assert.ok(p.ai_character !== null && typeof p.ai_character === 'object' && !Array.isArray(p.ai_character),
@@ -405,8 +408,8 @@ describe('chatroom-client — packet sending (typed senders)', () => {
   it('sendInventory resolves active character by metadata.activeCharacter', async () => {
     sendInventory({
       bots: [
-        { name: 'Aria', avatar_b64: null, description: 'A' },
-        { name: 'Lyra', avatar_b64: null, description: 'L' },
+        { name: 'Aria', avatar_url: null, description: 'A' },
+        { name: 'Lyra', avatar_url: null, description: 'L' },
       ],
       personas: [],
       metadata: { activeCharacter: 'Lyra' },
@@ -419,8 +422,8 @@ describe('chatroom-client — packet sending (typed senders)', () => {
   it('sendInventory falls back to bots[0] when no activeCharacter set', async () => {
     sendInventory({
       bots: [
-        { name: 'First', avatar_b64: null, description: '' },
-        { name: 'Second', avatar_b64: null, description: '' },
+        { name: 'First', avatar_url: null, description: '' },
+        { name: 'Second', avatar_url: null, description: '' },
       ],
       personas: [],
       metadata: {},
@@ -445,7 +448,7 @@ describe('chatroom-client — packet sending (typed senders)', () => {
   });
 
   it('sendInventoryUpdate uses ai_character as singular Object (snake_case, not bots array)', async () => {
-    sendInventoryUpdate({ bots: [{ name: 'Bot1', avatar_b64: null, description: '' }], personas: [], metadata: { activeCharacter: 'Bot1' } });
+    sendInventoryUpdate({ bots: [{ name: 'Bot1', avatar_url: null, description: '' }], personas: [], metadata: { activeCharacter: 'Bot1' } });
     await waitFor(() => serverReceived.some((f) => f.type === 'inventory_update' && f.ai_character));
     const p = serverReceived.find((f) => f.type === 'inventory_update' && f.ai_character);
     assert.ok(!Array.isArray(p.ai_character), 'ai_character must NOT be an array');

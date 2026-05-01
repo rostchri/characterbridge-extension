@@ -384,14 +384,14 @@ export function sendStreamEnd(streamId, finalText, charName) {
 }
 
 /**
- * Sends an expression/emotion update with optional image.
+ * Sends an expression/emotion update with optional image URL.
  *
  * @param {string|null} charName
  * @param {string} emotion
- * @param {string|null} imageBase64
+ * @param {string|null} imageUrl  Absolute URL of the expression image, or null.
  */
-export function sendExpression(charName, emotion, imageBase64) {
-  send({ type: 'expression_update', char_name: charName ?? null, emotion, image_b64: imageBase64 ?? null });
+export function sendExpression(charName, emotion, imageUrl) {
+  send({ type: 'expression_update', char_name: charName ?? null, emotion, image_url: imageUrl ?? null });
 }
 
 /**
@@ -400,15 +400,15 @@ export function sendExpression(charName, emotion, imageBase64) {
  *
  * @param {string|null} charName
  * @param {string} emotion
- * @param {string|null} imageBase64
+ * @param {string|null} imageUrl  Absolute URL of the expression image, or null.
  * @param {string|null} [chatId]
  */
-export function sendExpressionWithContext(charName, emotion, imageBase64, chatId) {
+export function sendExpressionWithContext(charName, emotion, imageUrl, chatId) {
   send({
     type: 'expression_update',
     char_name: charName ?? null,
     emotion,
-    image_b64: imageBase64 ?? null,
+    image_url: imageUrl ?? null,
     chat_id: chatId ?? null,
   });
 }
@@ -417,10 +417,10 @@ export function sendExpressionWithContext(charName, emotion, imageBase64, chatId
  * Sends a character avatar update.
  *
  * @param {string|null} charName
- * @param {string|null} imageBase64
+ * @param {string|null} imageUrl  Absolute URL of the avatar image, or null.
  */
-export function sendAvatar(charName, imageBase64) {
-  send({ type: 'avatar_update', char_name: charName ?? null, image_b64: imageBase64 ?? null });
+export function sendAvatar(charName, imageUrl) {
+  send({ type: 'avatar_update', char_name: charName ?? null, image_url: imageUrl ?? null });
 }
 
 /**
@@ -428,9 +428,9 @@ export function sendAvatar(charName, imageBase64) {
  * Returns the bot whose name matches metadata.activeCharacter, or bots[0]
  * as fallback, or null if no bots exist.
  *
- * @param {Array<{name: string, avatar_b64: string|null, description: string}>} bots
+ * @param {Array<{name: string, avatar_url: string|null, description: string}>} bots
  * @param {{activeCharacter?: string|null}} metadata
- * @returns {{name: string, avatar_b64: string|null, description: string}|null}
+ * @returns {{name: string, avatar_url: string|null, description: string}|null}
  */
 function resolveActiveCharacter(bots, metadata) {
   const list = bots ?? [];

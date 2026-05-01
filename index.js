@@ -147,7 +147,7 @@ onMessage(async (packet) => {
   scheduleExpressionUpdate(sharedState.lastActiveChatId);
 
   try {
-    const inventory = await collectInventory();
+    const inventory = collectInventory();
     sendInventory(inventory);
   } catch (err) {
     console.warn('[CharacterBridge] Failed to send initial inventory:', err);

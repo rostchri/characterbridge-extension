@@ -5,94 +5,47 @@
  * Collects all bots (characters) and personas from SillyTavern
  * and sends them as character_inventory / inventory_update packets
  * to the CharacterBridge middleware.
+ *
+ * Avatar transport: absolute URLs only — no base64 inline transfer.
+ * The Chatroom UI loads avatars directly from the ST origin via <img src>.
+ * Both domains share an Authelia SSO session, so no CORS headers are needed
+ * for img-tag requests.
+ *
+ * URL schema:
+ *   - Characters : /thumbnail?type=avatar&file=<avatar-filename>
+ *   - Personas   : /thumbnail?type=avatar&file=<persona-id>
  */
 
 import { sendInventoryUpdate } from "./chatroom-client.js";
-import { fetchLocalImageAsBase64 } from "./image-relay.js";
 
 // ---------------------------------------------------------------------------
-// Concurrency-limited map (#1818)
-// ---------------------------------------------------------------------------
-
-const AVATAR_FETCH_CONCURRENCY = 4;
-
-/**
- * Maps an array of items through an async transform with a bounded concurrency
- * limit. Unlike Promise.all, at most `limit` promises run in parallel at once.
- *
- * @template T, R
- * @param {T[]} items
- * @param {number} limit
- * @param {function(T): Promise<R>} fn
- * @returns {Promise<R[]>}
- */
-async function mapWithConcurrency(items, limit, fn) {
-  const results = new Array(items.length);
-  let index = 0;
-
-  async function worker() {
-    while (index < items.length) {
-      const i = index++;
-      results[i] = await fn(items[i]);
-    }
-  }
-
-  const workers = Array.from({ length: Math.min(limit, items.length) }, worker);
-  await Promise.all(workers);
-  return results;
-}
-
-// ---------------------------------------------------------------------------
-// Avatar cache (#1818)
+// Avatar URL construction
 // ---------------------------------------------------------------------------
 
 /**
- * Cache entry shape: { avatarUrl: string, data: string|null }
- * Keyed by character name (bots) or persona id (personas).
+ * Builds an absolute avatar URL for a SillyTavern character.
+ * ST serves character thumbnails via /thumbnail?type=avatar&file=<filename>.
  *
- * @type {Map<string, { avatarUrl: string, data: string|null }>}
+ * @param {string|null} avatarFilename  The `avatar` field from a ST character object.
+ * @returns {string|null}
  */
-const _avatarCache = new Map();
-
-/**
- * Fetches an avatar image as base64, returning the cached value when the URL
- * (or avatar hash) is unchanged.
- *
- * @param {string} cacheKey   Unique identifier (character name or persona id).
- * @param {string|null} avatarId  Raw avatar filename/ID from ST context.
- * @param {string} urlTemplate  URL template with a single `%s` placeholder.
- * @returns {Promise<string|null>}
- */
-async function fetchAvatarCached(cacheKey, avatarId, urlTemplate) {
-  if (!avatarId) return null;
-
-  const avatarUrl = urlTemplate.replace("%s", encodeURIComponent(avatarId));
-  const cached = _avatarCache.get(cacheKey);
-
-  if (cached && cached.avatarUrl === avatarUrl) {
-    return cached.data;
-  }
-
-  try {
-    const result = await fetchLocalImageAsBase64(avatarUrl);
-    const data = result ? result.data : null;
-    _avatarCache.set(cacheKey, { avatarUrl, data });
-    return data;
-  } catch (err) {
-    console.warn(
-      `[CharacterBridge] Failed to fetch avatar for "${cacheKey}":`,
-      err,
-    );
-    return null;
-  }
+function buildCharacterAvatarUrl(avatarFilename) {
+  if (!avatarFilename) return null;
+  const base = window.location.origin;
+  return `${base}/thumbnail?type=avatar&file=${encodeURIComponent(avatarFilename)}`;
 }
 
 /**
- * Clears the avatar cache. Call when a full inventory refresh is needed
- * (e.g. on reconnect).
+ * Builds an absolute avatar URL for a SillyTavern persona.
+ * ST serves persona thumbnails via /thumbnail?type=avatar&file=<persona-id>.
+ *
+ * @param {string|null} personaId  The persona key from powerUserSettings.personas.
+ * @returns {string|null}
  */
-export function clearAvatarCache() {
-  _avatarCache.clear();
+function buildPersonaAvatarUrl(personaId) {
+  if (!personaId) return null;
+  const base = window.location.origin;
+  return `${base}/thumbnail?type=avatar&file=${encodeURIComponent(personaId)}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -104,57 +57,39 @@ export function clearAvatarCache() {
  * Returns bots (AI characters), personas (user identities), and metadata
  * about the active chat state.
  *
- * Avatar fetches are rate-limited to AVATAR_FETCH_CONCURRENCY parallel
- * requests and cached by avatar URL so unchanged avatars skip the network.
+ * Avatar fields carry absolute URLs; no image data is fetched or transferred.
+ * The Chatroom UI loads avatars directly via <img src="...">.
  *
- * @returns {Promise<{bots: Array, personas: Array, metadata: object}>}
+ * @returns {{bots: Array, personas: Array, metadata: object}}
  */
-export async function collectInventory() {
+export function collectInventory() {
   const ctx = SillyTavern.getContext();
   const characters = ctx.characters || [];
   const powerUser = ctx.powerUserSettings || {};
 
-  // Collect bots (AI characters) — concurrency-limited
-  const filteredChars = characters.filter((c) => c.name?.trim());
-  const bots = await mapWithConcurrency(
-    filteredChars,
-    AVATAR_FETCH_CONCURRENCY,
-    async (c) => {
-      const avatar_b64 = await fetchAvatarCached(
-        c.name,
-        c.avatar,
-        "/characters/%s",
-      );
+  // Collect bots (AI characters)
+  const bots = characters
+    .filter((c) => c.name?.trim())
+    .map((c) => {
       const description = c.description || "";
       return {
         name: c.name,
-        avatar_b64,
+        avatar_url: buildCharacterAvatarUrl(c.avatar),
         description: description.length > 500 ? description.slice(0, 500) : description,
       };
-    },
-  );
+    });
 
-  // Collect personas (user identities) — concurrency-limited
+  // Collect personas (user identities)
   const personaMap = powerUser.personas || {};
   const personaDescriptions = powerUser.persona_descriptions || {};
-  const personaEntries = Object.entries(personaMap).filter(([, name]) => name?.trim());
-  const personas = await mapWithConcurrency(
-    personaEntries,
-    AVATAR_FETCH_CONCURRENCY,
-    async ([id, name]) => {
-      const avatar_b64 = await fetchAvatarCached(
-        `persona:${id}`,
-        id,
-        "/User Avatars/%s",
-      );
-      return {
-        id,
-        name,
-        avatar_b64,
-        description: personaDescriptions[id]?.description || "",
-      };
-    },
-  );
+  const personas = Object.entries(personaMap)
+    .filter(([, name]) => name?.trim())
+    .map(([id, name]) => ({
+      id,
+      name,
+      avatar_url: buildPersonaAvatarUrl(id),
+      description: personaDescriptions[id]?.description || "",
+    }));
 
   // Metadata about active state
   const activeGroup = ctx.groupId
@@ -229,12 +164,12 @@ export function startInventoryWatcher() {
   stopInventoryWatcher();
   _lastFingerprint = computeFingerprint();
 
-  _watcherTimer = setInterval(async () => {
+  _watcherTimer = setInterval(() => {
     const newFingerprint = computeFingerprint();
     if (newFingerprint !== _lastFingerprint) {
       _lastFingerprint = newFingerprint;
       try {
-        const inventory = await collectInventory();
+        const inventory = collectInventory();
         sendInventoryUpdate(inventory);
       } catch (err) {
         console.warn("[CharacterBridge] Inventory watcher update failed:", err);

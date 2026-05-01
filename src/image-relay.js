@@ -58,12 +58,13 @@ export function classifyImageSrc(src) {
 
 /**
  * Resolves a local ST src to an absolute URL on the same origin.
- * Only called after classifyImageSrc confirms the src is local.
+ * Exported so other modules (e.g. expression-relay) can build absolute URLs
+ * without duplicating this logic.
  *
  * @param {string} src
  * @returns {string}
  */
-function resolveLocalUrl(src) {
+export function resolveLocalUrl(src) {
   if (/^https?:\/\//i.test(src)) return src;
   if (src.startsWith("//")) return window.location.protocol + src;
   return window.location.origin + (src.startsWith("/") ? "" : "/") + src;
@@ -145,20 +146,18 @@ export async function fetchLocalImageAsBase64(src) {
 // ---------------------------------------------------------------------------
 
 /**
- * Resolves a single image src into a bridge-ready payload.
- * Local images are fetched as inline base64; external URLs are passed through.
+ * Resolves a single image src into an absolute URL.
+ * Local (same-origin) srcs are resolved to absolute URLs; external srcs are
+ * returned as-is. No image data is fetched.
  *
  * @param {string} src
- * @returns {Promise<{type: 'inline', data: string, mimeType: string, filename: string}|{type: 'url', url: string}|null>}
+ * @returns {string|null}  Absolute URL, or null if src is empty/invalid.
  */
-export async function resolveImagePayload(src) {
+export function resolveImagePayload(src) {
   const kind = classifyImageSrc(src);
   if (!kind) return null;
-  if (kind === "local") {
-    const fetched = await fetchLocalImageAsBase64(src);
-    return fetched ? { type: "inline", ...fetched } : null;
-  }
-  return { type: "url", url: src };
+  if (kind === "local") return resolveLocalUrl(src);
+  return src;
 }
 
 // ---------------------------------------------------------------------------
@@ -199,70 +198,74 @@ export function extractTextFromMesText(mesTextEl) {
 // ---------------------------------------------------------------------------
 
 /**
- * Resolves a list of src strings into bridge-ready image descriptors.
- * Local images are fetched as inline base64; external URLs are passed through.
+ * Resolves a list of src strings into absolute URLs.
+ * Local (same-origin) srcs are resolved to absolute URLs; external srcs are
+ * passed through as-is. No image data is fetched.
  *
  * @param {string[]} srcs
- * @returns {Promise<Array>}
+ * @returns {string[]}
  */
-export async function collectImages(srcs) {
-  const results = await Promise.all(srcs.map(resolveImagePayload));
-  return results.filter(Boolean);
+export function collectImages(srcs) {
+  return srcs
+    .filter(Boolean)
+    .map((src) => {
+      const kind = classifyImageSrc(src);
+      if (!kind) return null;
+      if (kind === "local") return resolveLocalUrl(src);
+      return src; // external URL — pass through
+    })
+    .filter(Boolean);
 }
 
 /**
- * Sends a prepared image list to the bridge.
+ * Sends a prepared list of image URLs to the bridge.
+ * Each entry in `images` must be an absolute URL string.
  *
  * @param {string} chatId
- * @param {Array} images
+ * @param {string[]} images  Absolute image URLs.
  * @param {string|null} [caption]
+ * @param {string|null} [charName]
  */
 export function sendCollectedImages(chatId, images, caption, charName) {
   if (!images?.length) return;
   safeSend({
     type: "send_images",
     chat_id: chatId,
-    images: images.map((img) => ({
-      data_b64: img.data || img.url,
-      mime_type: img.mimeType || "image/png",
-    })),
+    images: images.map((url) => ({ url })),
     char_name: charName || null,
     caption: caption || null,
   });
 }
 
 /**
- * Extracts, classifies, and sends all images found in a .mes_text element.
+ * Extracts, resolves, and sends all images found in a .mes_text element.
  *
  * @param {string} chatId
  * @param {Element} mesTextEl
  * @param {string|null} [caption]
  */
-export async function sendImagesFromMesText(chatId, mesTextEl, caption) {
+export function sendImagesFromMesText(chatId, mesTextEl, caption) {
   const srcs = extractImageSrcsFromMesText(mesTextEl);
   if (!srcs.length) return;
-  const images = await collectImages(srcs);
+  const images = collectImages(srcs);
   if (images.length > 0) sendCollectedImages(chatId, images, caption);
 }
 
 /**
- * Fetches and sends the avatar for a character.
- * Avatars are always local ST resources served via /characters/.
+ * Sends the avatar URL for a character.
+ * The Chatroom UI loads the avatar directly from the ST origin via <img src>.
  *
  * @param {string} chatId
  * @param {object} character
  */
-export async function sendCharacterAvatar(chatId, character) {
+export function sendCharacterAvatar(chatId, character) {
   if (!character?.avatar) return;
-  const src = `/characters/${encodeURIComponent(character.avatar)}`;
-  const fetched = await fetchLocalImageAsBase64(src);
-  if (!fetched) {
-    console.warn("[CharacterBridge] Could not fetch character avatar.");
-    return;
-  }
+  const url = resolveLocalUrl(
+    `/thumbnail?type=avatar&file=${encodeURIComponent(character.avatar)}`,
+  );
   sendCollectedImages(
     chatId,
-    [{ type: "inline", ...fetched }],
+    [url],
     character.name ? `**${character.name}**` : null,
     character.name || null,
   );
@@ -272,14 +275,13 @@ export async function sendCharacterAvatar(chatId, character) {
  * Scans the last AI message in the DOM for images and forwards them.
  * Called after generation ends to catch images ST adds post-generation
  * (auto-generated art, etc.) which don't surface via generation events.
- * Not awaited by callers so text replies reach Discord first.
  *
  * @param {string} chatId
  */
-export async function sendLastMessageImages(chatId) {
+export function sendLastMessageImages(chatId) {
   const messages = document.querySelectorAll("#chat .mes");
   if (!messages.length) return;
   const lastMessage = messages[messages.length - 1];
   if (lastMessage.getAttribute("is_user") === "true") return;
-  await sendImagesFromMesText(chatId, lastMessage.querySelector(".mes_text"));
+  sendImagesFromMesText(chatId, lastMessage.querySelector(".mes_text"));
 }

@@ -105,7 +105,7 @@ function parseExpressionFromElement(imgEl) {
   return name;
 }
 
-async function buildExpressionImagePayload(imgEl) {
+function buildExpressionImageUrl(imgEl) {
   if (!imgEl) return null;
   const src = imgEl.getAttribute("src");
   if (!src) return null;
@@ -118,19 +118,19 @@ async function buildExpressionImagePayload(imgEl) {
 
 /**
  * Reads the current expression block from the DOM and returns expression +
- * optional image payload.
+ * optional image URL.
  *
  * @param {boolean} includeImage
- * @returns {Promise<{expression: string, image: object|null, ownerName: string|null}|null>}
+ * @returns {{expression: string, image: string|null, ownerName: string|null}|null}
  */
-export async function getCurrentExpressionSnapshot(includeImage = false) {
+export function getCurrentExpressionSnapshot(includeImage = false) {
   const imgEl = document.getElementById("expression-image");
   if (!imgEl) return null;
 
   const expression = parseExpressionFromElement(imgEl);
   if (!expression) return null;
 
-  const image = includeImage ? await buildExpressionImagePayload(imgEl) : null;
+  const image = includeImage ? buildExpressionImageUrl(imgEl) : null;
   const ownerName =
     imgEl.getAttribute("data-sprite-folder-name")?.trim() || null;
   const snapshot = { expression, image, ownerName };
@@ -138,11 +138,11 @@ export async function getCurrentExpressionSnapshot(includeImage = false) {
   return snapshot;
 }
 
-export async function sendExpressionUpdate(chatIdHint = null) {
+export function sendExpressionUpdate(chatIdHint = null) {
   const settings = getSettings();
   if (settings.expressionMode === "off") return;
 
-  const snapshot = await getCurrentExpressionSnapshot(
+  const snapshot = getCurrentExpressionSnapshot(
     settings.expressionMode === "full",
   );
   if (!snapshot) return;
@@ -162,9 +162,11 @@ export async function sendExpressionUpdate(chatIdHint = null) {
 export function scheduleExpressionUpdate(chatIdHint = null) {
   if (expressionDebounceTimer) clearTimeout(expressionDebounceTimer);
   expressionDebounceTimer = setTimeout(() => {
-    sendExpressionUpdate(chatIdHint).catch((err) => {
+    try {
+      sendExpressionUpdate(chatIdHint);
+    } catch (err) {
       console.warn("[CharacterBridge] Failed to send expression update:", err);
-    });
+    }
   }, EXPRESSION_DEBOUNCE_MS);
 }
 
