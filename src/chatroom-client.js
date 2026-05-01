@@ -491,6 +491,27 @@ export function sendTypingAction(charName, active, chatId) {
 }
 
 /**
+ * Sends one streaming thinking delta to Chatroom.
+ * Used for live thinking-block streaming so the Chatroom user sees reasoning
+ * as it arrives rather than waiting for stream_end.
+ *
+ * @param {string} streamId
+ * @param {string} delta  New thinking characters since the last call.
+ * @param {string|null} charName
+ * @param {string|null} chatId
+ */
+export function sendStreamThinkingWithContext(streamId, delta, charName, chatId) {
+  send({
+    type: 'stream_thinking',
+    stream_id: streamId,
+    delta,
+    char_name: charName ?? null,
+    chat_id: chatId ?? null,
+    source: 'ai',
+  });
+}
+
+/**
  * Sends one streaming token chunk including chat context.
  *
  * @param {string} streamId

@@ -47,6 +47,7 @@ import { sharedState } from './state.js';
 import {
   sendTypingAction,
   sendStreamChunkWithContext,
+  sendStreamThinkingWithContext,
   sendStreamEndWithContext,
   sendAiReply,
   sendUserMessageReply,
@@ -135,18 +136,95 @@ export async function handleUserMessage(data) {
   // true per-chunk deltas without an O(n) startsWith comparison.
   // Reset to 0 on every GENERATION_STARTED.
   let lastSentLength = 0;
+  // Thinking-stream tracking: how many chars of the thinking block were already
+  // forwarded as stream_thinking deltas, and whether </think> was seen.
+  let thinkingSentLength = 0;
+  let thinkingClosed = false;
 
   const streamCallback = (cumulativeText) => {
     if (!currentStreamId) return;
-    // Strip leading <think>...</think> so live chunks never contain thinking content.
-    const visibleText = stripThinkingPrefix(cumulativeText);
-    // Use length-based delta derivation (O(1)) instead of startsWith (O(n)).
-    // If the visible text regressed (e.g. stream reset), emit the full text.
-    const newPart = visibleText.length >= lastSentLength
-      ? visibleText.slice(lastSentLength)
-      : visibleText;  // fallback: unexpected regression, emit as-is
+
+    // Determine whether we are currently inside an open <think> block.
+    // Tolerate optional leading whitespace before <think>.
+    const openIdx = cumulativeText.search(/^\s*<think>/);
+    const inThinkingMode = openIdx !== -1 && !thinkingClosed;
+
+    let newPart = '';
+
+    if (inThinkingMode) {
+      // Locate the actual start of content (after "<think>")
+      const tagEnd = cumulativeText.indexOf('<think>') + '<think>'.length;
+      const closeIdx = cumulativeText.indexOf('</think>');
+
+      if (closeIdx !== -1) {
+        // Thinking block is complete — send remaining delta then switch to visible mode.
+        const fullThinking = cumulativeText.slice(tagEnd, closeIdx);
+        const thinkingDelta = fullThinking.slice(thinkingSentLength);
+        if (thinkingDelta) {
+          sendStreamThinkingWithContext(
+            currentStreamId,
+            thinkingDelta,
+            currentCharacterName || getActiveCharName(),
+            messageState.chatId,
+          );
+          thinkingSentLength = fullThinking.length;
+        }
+        thinkingClosed = true;
+
+        // Continue with the visible text after </think>
+        const postThink = cumulativeText.slice(closeIdx + '</think>'.length).trimStart();
+        const newVisible = postThink.length >= lastSentLength
+          ? postThink.slice(lastSentLength)
+          : postThink;
+        if (newVisible) {
+          newPart = newVisible;
+          lastSentLength = postThink.length;
+        }
+      } else {
+        // Thinking block still open — forward incremental thinking delta only.
+        const partialThinking = cumulativeText.slice(tagEnd);
+        const thinkingDelta = partialThinking.slice(thinkingSentLength);
+        if (thinkingDelta) {
+          sendStreamThinkingWithContext(
+            currentStreamId,
+            thinkingDelta,
+            currentCharacterName || getActiveCharName(),
+            messageState.chatId,
+          );
+          thinkingSentLength = partialThinking.length;
+        }
+        // No visible chunk this tick while thinking is still open.
+        console.debug('[CharacterBridge:stream]', {
+          streamId: currentStreamId,
+          ts: Date.now(),
+          thinkingMode: true,
+          cumulativeLen: cumulativeText.length,
+          newPartLen: thinkingDelta.length,
+          preview: thinkingDelta.slice(0, 60),
+        });
+        messageState.isStreaming = true;
+        return;
+      }
+    } else {
+      // Standard path: no active thinking block.
+      const visibleText = stripThinkingPrefix(cumulativeText);
+      const delta = visibleText.length >= lastSentLength
+        ? visibleText.slice(lastSentLength)
+        : visibleText;  // fallback: unexpected regression, emit as-is
+      newPart = delta;
+      if (newPart) lastSentLength = visibleText.length;
+    }
+
+    console.debug('[CharacterBridge:stream]', {
+      streamId: currentStreamId,
+      ts: Date.now(),
+      thinkingMode: !thinkingClosed && cumulativeText.search(/^\s*<think>/) !== -1,
+      cumulativeLen: cumulativeText.length,
+      newPartLen: newPart.length,
+      preview: newPart.slice(0, 60),
+    });
+
     if (!newPart) return;  // skip empty deltas
-    lastSentLength = visibleText.length;
     messageState.isStreaming = true;
     messageState.streamedAny = true;
     sendStreamChunkWithContext(
@@ -285,7 +363,9 @@ export async function handleUserMessage(data) {
     currentStreamId = `${messageState.chatId}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
     const ctx = SillyTavern.getContext();
     currentCharacterName = ctx.groupId ? ctx.name2 || null : null;
-    lastSentLength = 0;  // reset delta baseline for each new stream
+    lastSentLength = 0;       // reset visible-delta baseline for each new stream
+    thinkingSentLength = 0;   // reset thinking-delta baseline
+    thinkingClosed = false;   // reset thinking-block state
   };
   eventSource.on(event_types.GENERATION_STARTED, onGenerationStarted);
 
@@ -506,7 +586,8 @@ export async function handleExecuteCommand(data) {
         // Aktiven Character+Chat in localStorage sichern damit tryResume() nach
         // dem Reload den Zustand wiederherstellen kann.
         saveResumeState();
-        replyText = "Reloading SillyTavern...";
+        console.debug('[CharacterBridge] reload command received — saving state and reloading');
+        // kein replyText — replyText bleibt der initialisierte Default-Wert
         // Kurzer Delay damit der reply-Frame noch raus geht
         setTimeout(() => {
           try {
