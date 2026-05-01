@@ -66,8 +66,12 @@ let _heartbeatTimer_test = null;
 /**
  * Testversion von sendChatState — schreibt Packet in _lastSentPacket.
  * sendChatStatePacket-Referenz wird per Closure injiziert.
+ * Aktualisiert auch prevChatIdRef damit onChatChanged korrekte old_chat_id hat.
+ *
+ * @param {Function} sendChatStatePacket
+ * @param {{ value: string|null }} [prevChatIdRef]  Optional shared ref fuer _prevChatId
  */
-function makeSendChatState(sendChatStatePacket) {
+function makeSendChatState(sendChatStatePacket, prevChatIdRef) {
   return function sendChatState() {
     try {
       const ctx = SillyTavern.getContext();
@@ -83,7 +87,35 @@ function makeSendChatState(sendChatStatePacket) {
       };
 
       sendChatStatePacket(payload);
+
+      // Fix #1826: Modul-State nach jedem Senden aktualisieren
+      if (prevChatIdRef) prevChatIdRef.value = payload.chat_file;
     } catch (_) {}
+  };
+}
+
+/**
+ * Testversion von onChatChanged — verwendet prevChatIdRef als Modul-State.
+ *
+ * @param {{ value: string|null }} prevChatIdRef  Geteilter Ref fuer _prevChatId
+ * @param {Function} sendChatSwitchedFn
+ * @param {Function} resetHashCacheFn
+ * @param {Function} sendChatStateFn
+ */
+function makeOnChatChanged(prevChatIdRef, sendChatSwitchedFn, resetHashCacheFn, sendChatStateFn) {
+  return function onChatChanged(newChatId) {
+    try {
+      const ctx = SillyTavern.getContext();
+      const char = ctx.characterId !== undefined ? ctx.characters?.[ctx.characterId] : undefined;
+      const resolvedNewId = newChatId ?? char?.chat ?? null;
+
+      sendChatSwitchedFn(prevChatIdRef.value, resolvedNewId);
+      prevChatIdRef.value = resolvedNewId;
+
+      resetHashCacheFn();
+    } catch (_) {}
+
+    sendChatStateFn();
   };
 }
 
@@ -463,5 +495,224 @@ describe('chat-state — sendChatStatePacket Packet-Shape (Integration)', () => 
     assert.strictEqual(wire.character_avatar, null);
     assert.strictEqual(wire.chat_file,        null);
     assert.strictEqual(wire.group_id,         null);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// #1827 — onChatChanged / sendChatSwitched Tests
+// ---------------------------------------------------------------------------
+
+describe('chat-state — onChatChanged sendet chat_switched korrekt', () => {
+
+  beforeEach(() => {
+    _ctxOverride = null;
+  });
+
+  it('sendet sendChatSwitched mit altem und neuem chat_id', () => {
+    _ctxOverride = {
+      characterId: 0,
+      characters: [makeChar('Aria', 'aria.png', 'aria-chat-002')],
+      groupId: null,
+    };
+
+    const prevRef = { value: 'aria-chat-001' };
+    const switched = [];
+    const sendChatSwitchedFn = (old, next) => switched.push({ old, next });
+    const onChatChanged = makeOnChatChanged(prevRef, sendChatSwitchedFn, () => {}, () => {});
+
+    onChatChanged('aria-chat-002');
+
+    assert.equal(switched.length, 1, 'sendChatSwitched muss einmal aufgerufen worden sein');
+    assert.equal(switched[0].old,  'aria-chat-001', 'old_chat_id muss der vorherige Wert sein');
+    assert.equal(switched[0].next, 'aria-chat-002', 'new_chat_id muss der neue Wert sein');
+  });
+
+  it('sendet null als old_chat_id wenn kein vorheriger Chat vorhanden', () => {
+    _ctxOverride = {
+      characterId: 0,
+      characters: [makeChar('Aria', 'aria.png', 'aria-chat-001')],
+      groupId: null,
+    };
+
+    const prevRef = { value: null };
+    const switched = [];
+    const sendChatSwitchedFn = (old, next) => switched.push({ old, next });
+    const onChatChanged = makeOnChatChanged(prevRef, sendChatSwitchedFn, () => {}, () => {});
+
+    onChatChanged('aria-chat-001');
+
+    assert.equal(switched.length, 1);
+    assert.strictEqual(switched[0].old, null, 'old_chat_id muss null sein wenn kein vorheriger Chat');
+    assert.equal(switched[0].next, 'aria-chat-001');
+  });
+
+  it('leitet newChatId aus Kontext ab wenn Parameter fehlt (ST ohne newChatId)', () => {
+    _ctxOverride = {
+      characterId: 0,
+      characters: [makeChar('Aria', 'aria.png', 'aria-chat-derived')],
+      groupId: null,
+    };
+
+    const prevRef = { value: 'old-chat' };
+    const switched = [];
+    const sendChatSwitchedFn = (old, next) => switched.push({ old, next });
+    const onChatChanged = makeOnChatChanged(prevRef, sendChatSwitchedFn, () => {}, () => {});
+
+    // kein Argument — muss chat aus Kontext lesen
+    onChatChanged();
+
+    assert.equal(switched.length, 1);
+    assert.equal(switched[0].old,  'old-chat',          'old_chat_id aus _prevChatId');
+    assert.equal(switched[0].next, 'aria-chat-derived', 'new_chat_id aus Kontext abgeleitet');
+  });
+
+  it('aktualisiert _prevChatId nach dem Wechsel korrekt', () => {
+    _ctxOverride = {
+      characterId: 0,
+      characters: [makeChar('Aria', 'aria.png', 'aria-chat-002')],
+      groupId: null,
+    };
+
+    const prevRef = { value: 'aria-chat-001' };
+    const onChatChanged = makeOnChatChanged(prevRef, () => {}, () => {}, () => {});
+
+    onChatChanged('aria-chat-002');
+
+    assert.equal(prevRef.value, 'aria-chat-002', '_prevChatId muss auf neuen Wert gesetzt sein');
+  });
+
+  it('ruft resetHashCache auf', () => {
+    _ctxOverride = {
+      characterId: 0,
+      characters: [makeChar('Aria', 'aria.png', 'aria-chat')],
+      groupId: null,
+    };
+
+    const prevRef = { value: null };
+    let resetCalled = false;
+    const onChatChanged = makeOnChatChanged(prevRef, () => {}, () => { resetCalled = true; }, () => {});
+
+    onChatChanged('aria-chat');
+
+    assert.ok(resetCalled, 'resetHashCache muss aufgerufen worden sein');
+  });
+
+  it('ruft sendChatState nach dem Wechsel auf', () => {
+    _ctxOverride = {
+      characterId: 0,
+      characters: [makeChar('Aria', 'aria.png', 'aria-chat')],
+      groupId: null,
+    };
+
+    const prevRef = { value: null };
+    let chatStateCalled = false;
+    const onChatChanged = makeOnChatChanged(prevRef, () => {}, () => {}, () => { chatStateCalled = true; });
+
+    onChatChanged('aria-chat');
+
+    assert.ok(chatStateCalled, 'sendChatState muss nach chat_switched aufgerufen worden sein');
+  });
+});
+
+// ---------------------------------------------------------------------------
+
+describe('chat-state — onChatChanged no-op bei identischen chat_ids', () => {
+
+  it('sendet chat_switched auch bei gleichem old und new (kein no-op im Client)', () => {
+    // Hinweis: Das Filtern identischer IDs ist Aufgabe des Servers, nicht des Clients.
+    // Wir verifizieren, dass der Client das Packet dennoch sendet und _prevChatId aktualisiert.
+    _ctxOverride = {
+      characterId: 0,
+      characters: [makeChar('Aria', 'aria.png', 'same-chat')],
+      groupId: null,
+    };
+
+    const prevRef = { value: 'same-chat' };
+    const switched = [];
+    const onChatChanged = makeOnChatChanged(prevRef, (o, n) => switched.push({ o, n }), () => {}, () => {});
+
+    onChatChanged('same-chat');
+
+    // Das Packet wird gesendet — der Server entscheidet, ob er es verarbeitet
+    assert.equal(switched.length, 1, 'chat_switched wird auch bei identischen IDs gesendet');
+    assert.equal(switched[0].o, 'same-chat');
+    assert.equal(switched[0].n, 'same-chat');
+  });
+});
+
+// ---------------------------------------------------------------------------
+
+describe('chat-state — sendChatState aktualisiert _prevChatId (Fix #1826)', () => {
+
+  beforeEach(() => {
+    _ctxOverride = null;
+  });
+
+  it('_prevChatId wird nach sendChatState auf aktuellen chat_file gesetzt', () => {
+    _ctxOverride = {
+      characterId: 0,
+      characters: [makeChar('Aria', 'aria.png', 'aria-chat-current')],
+      groupId: null,
+    };
+
+    const prevRef = { value: null };
+    const sendChatState = makeSendChatState(() => {}, prevRef);
+    sendChatState();
+
+    assert.equal(prevRef.value, 'aria-chat-current',
+      '_prevChatId muss nach sendChatState den aktuellen chat_file-Wert haben');
+  });
+
+  it('nachfolgendes onChatChanged kennt korrekte old_chat_id nach sendChatState', () => {
+    _ctxOverride = {
+      characterId: 0,
+      characters: [makeChar('Aria', 'aria.png', 'aria-chat-001')],
+      groupId: null,
+    };
+
+    const prevRef = { value: null };
+    const sendChatState = makeSendChatState(() => {}, prevRef);
+
+    // Erstes sendChatState — setzt _prevChatId auf 'aria-chat-001'
+    sendChatState();
+    assert.equal(prevRef.value, 'aria-chat-001');
+
+    // Chat wechselt
+    _ctxOverride = {
+      characterId: 0,
+      characters: [makeChar('Aria', 'aria.png', 'aria-chat-002')],
+      groupId: null,
+    };
+
+    const switched = [];
+    const onChatChanged = makeOnChatChanged(prevRef, (o, n) => switched.push({ o, n }), () => {}, () => {});
+    onChatChanged('aria-chat-002');
+
+    assert.equal(switched[0].o, 'aria-chat-001', 'old_chat_id muss aus dem vorherigen sendChatState kommen');
+    assert.equal(switched[0].n, 'aria-chat-002');
+  });
+
+  it('ST-Event CHAT_CHANGED triggert onChatChanged mit korrektem _prevChatId', () => {
+    _ctxOverride = {
+      characterId: 0,
+      characters: [makeChar('Aria', 'aria.png', 'aria-chat-003')],
+      groupId: null,
+    };
+
+    _registeredListeners.clear();
+
+    const prevRef = { value: 'aria-chat-002' };
+    const switched = [];
+    const sendChatState = makeSendChatState(() => {}, prevRef);
+    const onChatChanged = makeOnChatChanged(prevRef, (o, n) => switched.push({ o, n }), () => {}, sendChatState);
+
+    // Relay registrieren — CHAT_CHANGED -> onChatChanged
+    _mockEventSource.on(EV_CHAT_CHANGED, onChatChanged);
+    _mockEventSource.emit(EV_CHAT_CHANGED, 'aria-chat-003');
+
+    assert.equal(switched.length, 1);
+    assert.equal(switched[0].o, 'aria-chat-002', 'old_chat_id korrekt aus Modul-State');
+    assert.equal(switched[0].n, 'aria-chat-003');
+    assert.equal(prevRef.value,  'aria-chat-003', '_prevChatId nach Wechsel aktualisiert');
   });
 });

@@ -41,7 +41,7 @@ const _capturedResponses = [];
 
 /**
  * Inline replica of the chat_history_request case from handleExecuteCommand.
- * Uses the real computeHash from chat-mirror.js.
+ * Uses the real computeHash from hash-utils.js.
  */
 async function runChatHistoryRequest(data) {
   const sinceRaw = data.args?.[0];
