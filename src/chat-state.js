@@ -82,6 +82,10 @@ let _prevChatId = null;
  * Reads the current chat/character context from ST and sends a `chat_state`
  * packet to the Chatroom backend.
  *
+ * Also updates `_prevChatId` so that a subsequent `onChatChanged` call can
+ * report the correct old chat_id even on ST builds that do not pass the
+ * newChatId parameter to the CHAT_CHANGED event handler.
+ *
  * Safe to call at any time; silently dropped by chatroom-client.send() when
  * the socket is not authenticated.
  */
@@ -100,6 +104,10 @@ export function sendChatState() {
     };
 
     sendChatStatePacket(payload);
+
+    // Track the current chat so that onChatChanged() has the correct
+    // old_chat_id available regardless of whether ST passes newChatId.
+    _prevChatId = payload.chat_file;
   } catch (err) {
     console.warn('[CharacterBridge/chat-state] sendChatState failed:', err);
   }
@@ -140,8 +148,8 @@ export function onChatChanged(newChatId) {
  * Registers ST event listeners that trigger chat_state packets, and starts a
  * 30 s fallback heartbeat.
  *
- * Idempotent: calling setup multiple times does NOT register duplicate
- * listeners — stopChatStateRelay() must be called first to reset.
+ * Note: call stopChatStateRelay() before calling this again to avoid
+ * registering duplicate event listeners.
  */
 export function setupChatStateRelay() {
   // CHAT_CHANGED uses onChatChanged so we can emit chat_switched + reset hashes
