@@ -67,9 +67,20 @@ import {
 import { resolveThinking, stripThinkingPrefix } from './thinking-utils.js';
 import { extractAndStripVisualBeats } from './visual-beats.js';
 
-// String fallback covers older ST versions that don't export this event type.
+// String fallbacks cover older ST versions that don't export these event types.
 const GROUP_WRAPPER_FINISHED =
-  event_types.GROUP_WRAPPER_FINISHED ?? "group_wrapper_finished";
+  event_types.GROUP_WRAPPER_FINISHED ?? 'group_wrapper_finished';
+
+// STREAM_REASONING_DONE fires after the reasoning phase ends, BEFORE the first
+// visible token. Signature: (reasoningText, durationMs, messageId, state).
+// Edge-case: if a model emits BOTH extra.reasoning (via this event) AND an
+// inline <think>...</think> tag, the UI will receive two separate thinking
+// payloads. The `thinkingClosed = true` guard below prevents the inline-tag
+// path from re-sending the same content in the same stream, but if they differ
+// (e.g. summarised vs. raw) the bridge forwards both. Downstream consumers
+// should de-duplicate by stream_id if needed.
+const STREAM_REASONING_DONE =
+  event_types.STREAM_REASONING_DONE ?? 'stream_reasoning_done';
 
 // ---------------------------------------------------------------------------
 // Helper: get active character name
@@ -236,6 +247,29 @@ export async function handleUserMessage(data) {
   };
   eventSource.on(event_types.STREAM_TOKEN_RECEIVED, streamCallback);
 
+  // Fires when the model's reasoning phase ends (before the first visible
+  // token). We forward the entire reasoning text as a single stream_thinking
+  // delta and mark thinkingClosed so the inline <think>-tag path does not
+  // send the same content a second time.
+  const reasoningDoneCallback = (reasoningText, durationMs) => {
+    if (!currentStreamId || !reasoningText) return;
+    console.debug('[CharacterBridge:reasoning_done]', {
+      streamId: currentStreamId,
+      ts: Date.now(),
+      len: reasoningText.length,
+      durationMs,
+    });
+    sendStreamThinkingWithContext(
+      currentStreamId,
+      reasoningText,
+      currentCharacterName || getActiveCharName(),
+      messageState.chatId,
+    );
+    // Prevent the inline <think>-tag path from sending the same content again.
+    thinkingClosed = true;
+  };
+  eventSource.on(STREAM_REASONING_DONE, reasoningDoneCallback);
+
   const flushStreamEnd = () => {
     if (messageState.isStreaming && currentStreamId) {
       const isGroup = !!SillyTavern.getContext().groupId;
@@ -374,6 +408,7 @@ export async function handleUserMessage(data) {
       event_types.STREAM_TOKEN_RECEIVED,
       streamCallback,
     );
+    eventSource.removeListener(STREAM_REASONING_DONE, reasoningDoneCallback);
     eventSource.removeListener(
       event_types.GENERATION_STARTED,
       onGenerationStarted,
