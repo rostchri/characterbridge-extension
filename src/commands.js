@@ -415,9 +415,14 @@ export async function handleUserMessage(data) {
       }
     }
 
-    if (aiMessages.length > 0) {
+    // Wenn schon gestreamt wurde, hat das Backend stream_end + Mirror schon
+    // alles dargestellt. Ein zusaetzliches ai_reply wuerde im Chatroom-UI
+    // eine Doppel-Bubble verursachen (eine vom Stream, eine vom ai_reply).
+    if (messageState.streamedAny) {
+      // Bilder werden weiter unten ueber send_images verschickt.
+    } else if (aiMessages.length > 0) {
       sendAiReply(aiMessages, getActiveCharName(), messageState.chatId);
-    } else if (!messageState.streamedAny) {
+    } else {
       sendErrorMessage('No response generated.', messageState.chatId);
     }
 
