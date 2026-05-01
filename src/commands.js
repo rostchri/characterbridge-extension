@@ -677,22 +677,24 @@ export async function handleExecuteCommand(data) {
 
         const chatArr = SillyTavern.getContext().chat ?? [];
 
-        const messages = [];
-        for (let i = 0; i < chatArr.length; i++) {
-          if (hasSince && i < sinceIndex) continue;
-          const msg = chatArr[i];
-          if (!msg) continue;
+        // Collect the slice of messages to process, then hash all in parallel
+        // instead of sequentially to avoid O(n) awaits on large chats.
+        const slice = chatArr
+          .map((msg, i) => ({ msg, i }))
+          .filter(({ msg, i }) => msg && (!hasSince || i >= sinceIndex));
+
+        const messages = await Promise.all(slice.map(async ({ msg, i }) => {
           const content = msg.mes ?? '';
           const hash = await computeHash(content);
-          messages.push({
+          return {
             idx: i,
             role: msg.is_user ? 'user' : 'assistant',
             content,
             name: msg.name ?? '',
             hash,
             extra: msg.extra ?? null,
-          });
-        }
+          };
+        }));
 
         sendChatHistoryResponse(data.chatId, messages, true);
         replyText = `Sent ${messages.length} messages`;
