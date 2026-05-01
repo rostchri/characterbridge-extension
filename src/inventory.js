@@ -37,7 +37,7 @@ function buildCharacterAvatarUrl(avatarFilename) {
 
 /**
  * Builds an absolute avatar URL for a SillyTavern persona.
- * ST serves persona thumbnails via /thumbnail?type=avatar&file=<persona-id>.
+ * ST serves persona thumbnails via /thumbnail?type=persona&file=<persona-id>.
  *
  * @param {string|null} personaId  The persona key from powerUserSettings.personas.
  * @returns {string|null}
@@ -45,7 +45,7 @@ function buildCharacterAvatarUrl(avatarFilename) {
 function buildPersonaAvatarUrl(personaId) {
   if (!personaId) return null;
   const base = window.location.origin;
-  return `${base}/thumbnail?type=avatar&file=${encodeURIComponent(personaId)}`;
+  return `${base}/thumbnail?type=persona&file=${encodeURIComponent(personaId)}`;
 }
 
 // ---------------------------------------------------------------------------

@@ -210,8 +210,8 @@ describe('inventory — avatar_url construction', () => {
     const result = collectInventory();
     assert.equal(
       result.personas[0].avatar_url,
-      'https://st.example.com/thumbnail?type=avatar&file=uid-abc',
-      'Persona avatar_url must use /thumbnail?type=avatar&file=<persona-id>',
+      'https://st.example.com/thumbnail?type=persona&file=uid-abc',
+      'Persona avatar_url must use /thumbnail?type=persona&file=<persona-id>',
     );
   });
 
@@ -220,7 +220,7 @@ describe('inventory — avatar_url construction', () => {
     const result = collectInventory();
     assert.equal(
       result.personas[0].avatar_url,
-      'https://st.example.com/thumbnail?type=avatar&file=uid%201%202',
+      'https://st.example.com/thumbnail?type=persona&file=uid%201%202',
     );
   });
 
