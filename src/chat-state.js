@@ -41,7 +41,8 @@
  */
 
 import { eventSource, event_types } from '../../../../../script.js';
-import { sendChatStatePacket } from './chatroom-client.js';
+import { sendChatStatePacket, sendChatSwitched } from './chatroom-client.js';
+import { resetHashCache } from './chat-mirror.js';
 
 // ---------------------------------------------------------------------------
 // ST event name constants (with fallbacks for older builds)
@@ -64,6 +65,14 @@ const HEARTBEAT_INTERVAL_MS = 30_000;
 
 /** @type {ReturnType<typeof setInterval>|null} */
 let _heartbeatTimer = null;
+
+/**
+ * The chat_id that was active before the most recent CHAT_CHANGED event.
+ * Used to populate old_chat_id in sendChatSwitched().
+ *
+ * @type {string|null}
+ */
+let _prevChatId = null;
 
 // ---------------------------------------------------------------------------
 // sendChatState
@@ -96,6 +105,33 @@ export function sendChatState() {
   }
 }
 
+/**
+ * Handles a CHAT_CHANGED event: sends a chat_switched notification and then
+ * the standard chat_state update.  Also resets the hash cache so stale hashes
+ * from the previous chat do not suppress change notifications in the new chat.
+ *
+ * @param {string|null} [newChatId]  Passed by some ST builds; derived from
+ *   context when absent.
+ */
+export function onChatChanged(newChatId) {
+  try {
+    const ctx = SillyTavern.getContext();
+    const char = ctx.characterId !== undefined ? ctx.characters?.[ctx.characterId] : undefined;
+    const resolvedNewId = newChatId ?? char?.chat ?? null;
+
+    sendChatSwitched(_prevChatId, resolvedNewId);
+    _prevChatId = resolvedNewId;
+
+    // Clear stale hashes from the previous chat
+    resetHashCache();
+  } catch (err) {
+    console.warn('[CharacterBridge/chat-state] onChatChanged (switch) failed:', err);
+  }
+
+  // Always follow up with a full chat_state packet
+  sendChatState();
+}
+
 // ---------------------------------------------------------------------------
 // setupChatStateRelay / stopChatStateRelay
 // ---------------------------------------------------------------------------
@@ -108,7 +144,8 @@ export function sendChatState() {
  * listeners — stopChatStateRelay() must be called first to reset.
  */
 export function setupChatStateRelay() {
-  eventSource.on(EV_CHAT_CHANGED, sendChatState);
+  // CHAT_CHANGED uses onChatChanged so we can emit chat_switched + reset hashes
+  eventSource.on(EV_CHAT_CHANGED, onChatChanged);
   eventSource.on(EV_CHARACTER_SELECTED, sendChatState);
   eventSource.on(EV_GROUP_CHAT_CREATED, sendChatState);
 
@@ -124,7 +161,7 @@ export function setupChatStateRelay() {
  */
 export function stopChatStateRelay() {
   try {
-    eventSource.removeListener(EV_CHAT_CHANGED, sendChatState);
+    eventSource.removeListener(EV_CHAT_CHANGED, onChatChanged);
     eventSource.removeListener(EV_CHARACTER_SELECTED, sendChatState);
     eventSource.removeListener(EV_GROUP_CHAT_CREATED, sendChatState);
   } catch (_) {}
