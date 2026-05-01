@@ -696,8 +696,19 @@ export async function handleExecuteCommand(data) {
           };
         }));
 
-        sendChatHistoryResponse(data.chatId, messages, true);
-        replyText = `Sent ${messages.length} messages`;
+        // chat_id Fallback: data.chatId fehlt typischerweise weil das Server-
+        // command-Packet kein chatId-Feld hat. Nutze stattdessen ST's eigene
+        // getCurrentChatId() um den aktiven Chat zu identifizieren.
+        const ctx = SillyTavern.getContext();
+        const chatId = data.chatId
+          ?? ctx.getCurrentChatId?.()
+          ?? ctx.chat_metadata?.chat_id
+          ?? null;
+
+        sendChatHistoryResponse(chatId, messages, true);
+        // KEINE replyText-Bubble — User wollte das nur als console.debug.
+        console.debug('[CharacterBridge] chat_history_request: sent', messages.length, 'messages chatId=', chatId);
+        replyText = '';
         break;
       }
 
