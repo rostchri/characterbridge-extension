@@ -261,3 +261,94 @@ describe('removeAllListeners — reasoningDoneCallback wird entfernt', () => {
     assert.equal(remaining, 0, 'Nach allen Zyklen keine Listener-Leaks');
   });
 });
+
+// ---------------------------------------------------------------------------
+// 6. reasoningDoneCallback — Doppel-Send-Schutz via lastReasoningSent
+// ---------------------------------------------------------------------------
+
+/**
+ * Erweiterte Harness die auch lastReasoningSent trackt (neues Verhalten).
+ */
+function makeTestHarnessWithLiveTracking({ streamId = 'test-stream-1', initialLastReasoningSent = '' } = {}) {
+  let currentStreamId = streamId;
+  let thinkingClosed = false;
+  let lastReasoningSent = initialLastReasoningSent;
+
+  const sent = [];
+
+  function sendStreamThinkingWithContext(sid, delta, charName, chatId) {
+    sent.push({ streamId: sid, delta, charName, chatId });
+  }
+
+  function getActiveCharName() { return 'TestChar'; }
+
+  const currentCharacterName = null;
+  const chatId = 'chat-99';
+
+  // Spiegelt die neue reasoningDoneCallback-Logik aus commands.js.
+  const reasoningDoneCallback = (reasoningText, _durationMs) => {
+    if (!currentStreamId || !reasoningText) return;
+    const remainder = reasoningText.length > lastReasoningSent.length
+      ? reasoningText.slice(lastReasoningSent.length)
+      : '';
+    if (remainder) {
+      sendStreamThinkingWithContext(
+        currentStreamId,
+        remainder,
+        currentCharacterName || getActiveCharName(),
+        chatId,
+      );
+      lastReasoningSent = reasoningText;
+    }
+    thinkingClosed = true;
+  };
+
+  return {
+    callback: reasoningDoneCallback,
+    sent,
+    state: {
+      get thinkingClosed() { return thinkingClosed; },
+      get lastReasoningSent() { return lastReasoningSent; },
+    },
+  };
+}
+
+describe('reasoningDoneCallback — Doppel-Send-Schutz (lastReasoningSent)', () => {
+
+  it('sendet den vollen Text wenn lastReasoningSent noch leer ist', () => {
+    const { callback, sent } = makeTestHarnessWithLiveTracking({ initialLastReasoningSent: '' });
+    callback('Ich denke nach: Schritt 1, Schritt 2', 1000);
+    assert.equal(sent.length, 1, 'Genau ein Send');
+    assert.equal(sent[0].delta, 'Ich denke nach: Schritt 1, Schritt 2');
+  });
+
+  it('sendet NUR den Rest wenn Live-Polling bereits einen Teil gesendet hat', () => {
+    // Live-Polling hat "Ich denke" bereits gesendet
+    const { callback, sent } = makeTestHarnessWithLiveTracking({
+      initialLastReasoningSent: 'Ich denke',
+    });
+    callback('Ich denke nach mehr', 1000);
+    assert.equal(sent.length, 1, 'Nur ein Send fuer den Rest-Anteil');
+    assert.equal(sent[0].delta, ' nach mehr', 'Nur der fehlende Anteil wird gesendet');
+  });
+
+  it('sendet NICHTS wenn Live-Polling bereits den vollen Text gesendet hat', () => {
+    const fullText = 'Ich denke vollstaendig nach';
+    const { callback, sent, state } = makeTestHarnessWithLiveTracking({
+      initialLastReasoningSent: fullText,
+    });
+    callback(fullText, 1000);
+    assert.equal(sent.length, 0, 'Kein Doppel-Send wenn alles schon gesendet');
+    // thinkingClosed muss dennoch gesetzt werden!
+    assert.equal(state.thinkingClosed, true, 'thinkingClosed wird trotzdem gesetzt');
+  });
+
+  it('setzt thinkingClosed auch wenn kein Send stattfindet (voller Live-Pre-Send)', () => {
+    const fullText = 'komplettes reasoning';
+    const { callback, state } = makeTestHarnessWithLiveTracking({
+      initialLastReasoningSent: fullText,
+    });
+    callback(fullText, 500);
+    assert.equal(state.thinkingClosed, true, 'thinkingClosed gesetzt trotz skip');
+  });
+});

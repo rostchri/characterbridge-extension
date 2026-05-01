@@ -151,9 +151,54 @@ export async function handleUserMessage(data) {
   // forwarded as stream_thinking deltas, and whether </think> was seen.
   let thinkingSentLength = 0;
   let thinkingClosed = false;
+  // Live-Reasoning-Polling: tracks how many chars of chat[i].extra.reasoning
+  // have already been forwarded so we only send deltas, not the full text.
+  // Reset to '' on every GENERATION_STARTED.
+  let lastReasoningSent = '';
 
   const streamCallback = (cumulativeText) => {
     if (!currentStreamId) return;
+
+    // Live-Reasoning-Polling: ST aktualisiert chat[lastIdx].extra.reasoning pro
+    // Streaming-Tick. Solange thinking nicht abgeschlossen ist, lesen wir den
+    // aktuellen Wert und senden nur den neu hinzugekommenen Anteil als Delta.
+    // Dies ermoeglicht Live-Thinking in der UI schon waehrend des Streamings,
+    // statt erst nach STREAM_REASONING_DONE den kompletten Text zu senden.
+    if (!thinkingClosed) {
+      try {
+        const ctx = SillyTavern.getContext();
+        const chat = ctx.chat;
+        if (chat && chat.length > 0) {
+          const lastIdx = chat.length - 1;
+          const reasoningNow = chat[lastIdx]?.extra?.reasoning ?? '';
+          if (reasoningNow.length > lastReasoningSent.length) {
+            const newReasoning = reasoningNow.slice(lastReasoningSent.length);
+            if (newReasoning) {
+              sendStreamThinkingWithContext(
+                currentStreamId,
+                newReasoning,
+                currentCharacterName || getActiveCharName(),
+                messageState.chatId,
+              );
+              lastReasoningSent = reasoningNow;
+              console.debug('[CharacterBridge:reasoning_live]', {
+                streamId: currentStreamId,
+                ts: Date.now(),
+                deltaLen: newReasoning.length,
+                totalLen: reasoningNow.length,
+              });
+            }
+          } else if (reasoningNow.length < lastReasoningSent.length) {
+            // Defensiver Reset: reasoning wurde rueckwaerts gezaehlt (unwahrscheinlich,
+            // z.B. wenn ST intern die Nachricht neu aufbaut). Cursor zuruecksetzen
+            // damit wir nicht ein veraltetes Offset im Text halten.
+            lastReasoningSent = reasoningNow;
+          }
+        }
+      } catch (err) {
+        console.warn('[CharacterBridge] live-reasoning poll fehlgeschlagen:', err);
+      }
+    }
 
     // Determine whether we are currently inside an open <think> block.
     // Tolerate optional leading whitespace before <think>.
@@ -248,23 +293,37 @@ export async function handleUserMessage(data) {
   eventSource.on(event_types.STREAM_TOKEN_RECEIVED, streamCallback);
 
   // Fires when the model's reasoning phase ends (before the first visible
-  // token). We forward the entire reasoning text as a single stream_thinking
-  // delta and mark thinkingClosed so the inline <think>-tag path does not
+  // token). Marks thinkingClosed so the inline <think>-tag path does not
   // send the same content a second time.
+  //
+  // Live-Reasoning-Dedup: wenn das Live-Polling in streamCallback den
+  // vollstaendigen Text bereits gesendet hat (lastReasoningSent.length ===
+  // reasoningText.length), wird hier kein zweites Send ausgefuehrt. Nur der
+  // noch fehlende Rest-Anteil (falls vorhanden) wird nachgesendet.
   const reasoningDoneCallback = (reasoningText, durationMs) => {
     if (!currentStreamId || !reasoningText) return;
     console.debug('[CharacterBridge:reasoning_done]', {
       streamId: currentStreamId,
       ts: Date.now(),
       len: reasoningText.length,
+      alreadySentLen: lastReasoningSent.length,
       durationMs,
     });
-    sendStreamThinkingWithContext(
-      currentStreamId,
-      reasoningText,
-      currentCharacterName || getActiveCharName(),
-      messageState.chatId,
-    );
+    // Sende nur den noch nicht per Live-Polling gesendeten Rest-Anteil.
+    // Wurde der gesamte Text bereits live gesendet, wird kein weiteres Packet
+    // gesendet (verhindert Doppel-Thinking in der UI).
+    const remainder = reasoningText.length > lastReasoningSent.length
+      ? reasoningText.slice(lastReasoningSent.length)
+      : '';
+    if (remainder) {
+      sendStreamThinkingWithContext(
+        currentStreamId,
+        remainder,
+        currentCharacterName || getActiveCharName(),
+        messageState.chatId,
+      );
+      lastReasoningSent = reasoningText;
+    }
     // Prevent the inline <think>-tag path from sending the same content again.
     thinkingClosed = true;
   };
@@ -400,6 +459,7 @@ export async function handleUserMessage(data) {
     lastSentLength = 0;       // reset visible-delta baseline for each new stream
     thinkingSentLength = 0;   // reset thinking-delta baseline
     thinkingClosed = false;   // reset thinking-block state
+    lastReasoningSent = '';   // reset live-reasoning-polling baseline
   };
   eventSource.on(event_types.GENERATION_STARTED, onGenerationStarted);
 
