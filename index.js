@@ -55,6 +55,7 @@ import {
   sendInventoryUpdate,
   isConnected,
 } from './src/chatroom-client.js';
+import { setupHashPolling, stopHashPolling } from './src/chat-mirror.js';
 import { MODULE_NAME, getSettings, updateStatus } from './src/settings.js';
 import { sharedState } from './src/state.js';
 import {
@@ -170,6 +171,11 @@ onMessage(async (packet) => {
   // each reconnect to avoid duplicate listeners across reconnect cycles).
   stopChatStateRelay();
   setupChatStateRelay();
+
+  // Start hash-polling for source-of-truth change detection (stops + restarts
+  // on each reconnect to avoid duplicate intervals across reconnect cycles).
+  stopHashPolling();
+  setupHashPolling();
 });
 
 // ---------------------------------------------------------------------------
@@ -219,6 +225,7 @@ jQuery(async () => {
 
     $('#chatroom_disconnect_button').on('click', () => {
       stopInventoryWatcher();
+      stopHashPolling();
       disconnect();
     });
 
