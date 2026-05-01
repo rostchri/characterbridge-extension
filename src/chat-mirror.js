@@ -45,7 +45,7 @@ import { computeHash } from './hash-utils.js';
 // ---------------------------------------------------------------------------
 
 const POLL_INTERVAL_MS = 3_000;
-const TAIL_LENGTH = 3;
+const TAIL_LENGTH = 5;
 
 // ---------------------------------------------------------------------------
 // Module-private state
@@ -92,7 +92,11 @@ async function _recheckTail() {
     if (!msg) continue;
 
     const content = msg.mes ?? '';
-    const hash = await computeHash(content);
+    // Hash inkludiert extra.media-URLs, extra.image und extra.image_swipes,
+    // damit auch nachgereichte Bilder vom st-image-auto-generation Plugin
+    // (das extra modifiziert OHNE msg.mes zu aendern) erkannt werden.
+    const hashInput = content + '\x00' + _serializeMediaForHash(msg.extra);
+    const hash = await computeHash(hashInput);
     const prevHash = _lastHashes.get(i);
 
     if (hash !== prevHash) {
@@ -105,12 +109,35 @@ async function _recheckTail() {
           hash,
           msg.is_user ? 'user' : 'assistant',
           msg.name ?? '',
+          msg.extra ?? null,
         );
       } catch (err) {
         console.warn('[CharacterBridge/chat-mirror] sendMessageChanged failed:', err);
       }
     }
   }
+}
+
+/**
+ * Serialisiert media-relevante Felder aus extra zu einem stabilen String,
+ * damit Aenderungen via Hash erkannt werden.
+ *
+ * @param {object|null|undefined} extra
+ * @returns {string}
+ */
+function _serializeMediaForHash(extra) {
+  if (!extra || typeof extra !== 'object') return '';
+  const parts = [];
+  if (Array.isArray(extra.media)) {
+    parts.push('m:' + extra.media.map((m) => m?.url ?? '').join(','));
+  }
+  if (Array.isArray(extra.image_swipes)) {
+    parts.push('s:' + extra.image_swipes.join(','));
+  }
+  if (typeof extra.image === 'string') {
+    parts.push('i:' + extra.image);
+  }
+  return parts.join('|');
 }
 
 // ---------------------------------------------------------------------------

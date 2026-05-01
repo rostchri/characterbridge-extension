@@ -610,7 +610,7 @@ export function sendChatHistoryResponse(chatId, messages, complete) {
  * @param {string} role    'user' | 'assistant'
  * @param {string} name    Speaker name
  */
-export function sendMessageChanged(chatId, idx, content, hash, role, name) {
+export function sendMessageChanged(chatId, idx, content, hash, role, name, extra) {
   send({
     type: 'message_changed',
     chat_id: chatId,
@@ -619,6 +619,7 @@ export function sendMessageChanged(chatId, idx, content, hash, role, name) {
     hash,
     role,
     name,
+    extra: extra ?? null,
   });
 }
 
