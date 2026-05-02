@@ -604,13 +604,15 @@ export function sendChatHistoryResponse(chatId, messages, complete) {
  * Notifies Chatroom that a message was changed (edit, regen, or external update).
  *
  * @param {string} chatId
- * @param {number} idx     Index into the ST chat array
- * @param {string} content New message content (mes field)
- * @param {string} hash    SHA-1 hex of content
- * @param {string} role    'user' | 'assistant'
- * @param {string} name    Speaker name
+ * @param {number} idx       Index into the ST chat array
+ * @param {string} content   New message content (mes field)
+ * @param {string} hash      SHA-1 hex of content
+ * @param {string} role      'user' | 'assistant'
+ * @param {string} name      Speaker name
+ * @param {object|null} extra ST extra field (api, model, send_date, media, ...)
+ * @param {string|null} [sendDate] ST msg.send_date (top-level field)
  */
-export function sendMessageChanged(chatId, idx, content, hash, role, name, extra) {
+export function sendMessageChanged(chatId, idx, content, hash, role, name, extra, sendDate) {
   send({
     type: 'message_changed',
     chat_id: chatId,
@@ -620,6 +622,7 @@ export function sendMessageChanged(chatId, idx, content, hash, role, name, extra
     role,
     name,
     extra: extra ?? null,
+    send_date: sendDate ?? null,
   });
 }
 

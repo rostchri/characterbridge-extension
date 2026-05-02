@@ -11,7 +11,7 @@
 
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { sanitizeSlashArg, sanitizeChatArg } from '../utils.js';
+import { sanitizeSlashArg, sanitizeChatArg, getDisplayText } from '../utils.js';
 
 // ---------------------------------------------------------------------------
 
@@ -90,5 +90,61 @@ describe('sanitizeChatArg — path traversal prevention (#1811)', () => {
     assert.equal(sanitizeChatArg('../../'), '');
     assert.equal(sanitizeChatArg('/'), '');
     assert.equal(sanitizeChatArg('\\'), '');
+  });
+});
+
+// ---------------------------------------------------------------------------
+
+describe('getDisplayText', () => {
+
+  it('returns extra.display_text when present and non-empty', () => {
+    const msg = { mes: 'Hello', extra: { display_text: 'Hallo' } };
+    assert.equal(getDisplayText(msg), 'Hallo');
+  });
+
+  it('falls back to mes when display_text is missing', () => {
+    const msg = { mes: 'Hello', extra: {} };
+    assert.equal(getDisplayText(msg), 'Hello');
+  });
+
+  it('falls back to mes when extra is missing entirely', () => {
+    const msg = { mes: 'Hello' };
+    assert.equal(getDisplayText(msg), 'Hello');
+  });
+
+  it('falls back to mes when display_text is empty string', () => {
+    const msg = { mes: 'Hello', extra: { display_text: '' } };
+    assert.equal(getDisplayText(msg), 'Hello');
+  });
+
+  it('falls back to mes when display_text is whitespace only', () => {
+    const msg = { mes: 'Hello', extra: { display_text: '   \n  ' } };
+    assert.equal(getDisplayText(msg), 'Hello');
+  });
+
+  it('falls back to mes when display_text is non-string', () => {
+    const msg = { mes: 'Hello', extra: { display_text: 42 } };
+    assert.equal(getDisplayText(msg), 'Hello');
+    const msg2 = { mes: 'Hello', extra: { display_text: null } };
+    assert.equal(getDisplayText(msg2), 'Hello');
+  });
+
+  it('returns empty string for null/undefined msg', () => {
+    assert.equal(getDisplayText(null), '');
+    assert.equal(getDisplayText(undefined), '');
+  });
+
+  it('returns empty string when both mes and display_text are missing', () => {
+    assert.equal(getDisplayText({}), '');
+  });
+
+  it('preserves whitespace and formatting (no trim on output)', () => {
+    const msg = { mes: 'a', extra: { display_text: '  Hallo Welt  \n' } };
+    assert.equal(getDisplayText(msg), '  Hallo Welt  \n');
+  });
+
+  it('display_text wins even when shorter than mes', () => {
+    const msg = { mes: 'Long original english text', extra: { display_text: 'Kurz' } };
+    assert.equal(getDisplayText(msg), 'Kurz');
   });
 });

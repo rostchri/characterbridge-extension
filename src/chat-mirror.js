@@ -38,6 +38,7 @@
 import { eventSource, event_types } from '../../../../../script.js';
 import { sharedState } from './state.js';
 import { sendMessageChanged } from './chatroom-client.js';
+import { getDisplayText } from './utils.js';
 import { computeHash } from './hash-utils.js';
 
 // ---------------------------------------------------------------------------
@@ -101,7 +102,9 @@ async function _recheckTail() {
     const msg = chat[i];
     if (!msg) continue;
 
-    const content = msg.mes ?? '';
+    // ST-Translate-Extension speichert die Uebersetzung in extra.display_text;
+    // wir spiegeln das was der User in ST sieht, nicht den englischen mes-Wert.
+    const content = getDisplayText(msg);
     // Hash inkludiert extra.media-URLs, extra.image und extra.image_swipes,
     // damit auch nachgereichte Bilder vom st-image-auto-generation Plugin
     // (das extra modifiziert OHNE msg.mes zu aendern) erkannt werden.
@@ -120,6 +123,7 @@ async function _recheckTail() {
           msg.is_user ? 'user' : 'assistant',
           msg.name ?? '',
           msg.extra ?? null,
+          msg.send_date ?? null,
         );
       } catch (err) {
         console.warn('[CharacterBridge/chat-mirror] sendMessageChanged failed:', err);

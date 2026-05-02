@@ -29,6 +29,7 @@
 import { eventSource, event_types } from "../../../../../script.js";
 import { safeSend } from "./ws.js";
 import { clearExpressionCache } from "./expression-relay.js";
+import { getDisplayText } from "./utils.js";
 
 // Cap on AI messages included in a single recap to avoid flooding in large groups.
 const RECAP_MAX_AI_MESSAGES = 10;
@@ -62,7 +63,8 @@ export function buildLastExchange(chat) {
   let i = chat.length - 1;
   while (i >= 0 && !chat[i].is_user) {
     const msg = chat[i];
-    const text = msg.mes?.trim();
+    // ST-Translate-Extension: extra.display_text bevorzugen wenn vorhanden.
+    const text = getDisplayText(msg).trim();
     if (text && !isMetaMessage(text))
       aiMessages.unshift({ name: msg.name || "", text, isUser: false });
     i--;
@@ -122,7 +124,8 @@ export function buildHistory(chat, n) {
     const aiMessages = [];
     while (i >= 0 && !chat[i].is_user) {
       const msg = chat[i];
-      const text = msg.mes?.trim();
+      // ST-Translate-Extension: extra.display_text bevorzugen wenn vorhanden.
+    const text = getDisplayText(msg).trim();
       if (text && !isMetaMessage(text))
         aiMessages.unshift({ name: msg.name || "", text, isUser: false });
       i--;

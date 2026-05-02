@@ -64,3 +64,33 @@ export function sanitizeNoteArg(value) {
     .trim()
     .slice(0, 4096);
 }
+
+/**
+ * Returns the user-visible text of a chat message.
+ *
+ * SillyTavern's translation extension keeps the original message in `mes`
+ * and stores the translated/displayed string in `extra.display_text`. When
+ * present and non-empty, that is what the user actually sees in the ST UI,
+ * so it is what we want to mirror to the bridge — otherwise the bridge
+ * would display the untranslated source while ST shows the target language.
+ *
+ * Fallback chain:
+ *   1. extra.display_text  — translation extension target (string, non-empty after trim)
+ *   2. mes                 — original message text
+ *   3. ''                  — last-resort empty string
+ *
+ * The returned string is *not* trimmed itself; whitespace/formatting at
+ * either end is preserved so downstream consumers (PicExtractor, hashing,
+ * roleplay-markdown) keep their byte-for-byte semantics.
+ *
+ * @param {{mes?: string|null, extra?: {display_text?: string|null}|null}|null|undefined} msg
+ * @returns {string}
+ */
+export function getDisplayText(msg) {
+  if (!msg) return '';
+  const displayed = msg.extra?.display_text;
+  if (typeof displayed === 'string' && displayed.trim().length > 0) {
+    return displayed;
+  }
+  return msg.mes ?? '';
+}

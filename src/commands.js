@@ -54,7 +54,7 @@ import {
   sendErrorMessage,
   sendChatHistoryResponse,
 } from './chatroom-client.js';
-import { sanitizeSlashArg, sanitizeChatArg } from './utils.js';
+import { sanitizeSlashArg, sanitizeChatArg, getDisplayText } from './utils.js';
 import { computeHash } from './hash-utils.js';
 import { sendLastMessageImages, extractImageSrcsFromMesText } from './image-relay.js';
 import {
@@ -352,8 +352,11 @@ export async function handleUserMessage(data) {
               !currentCharacterName ||
               msg.name === currentCharacterName
             ) {
-              if (msg.mes?.trim()) {
-                const split = resolveThinking(msg.mes.trim(), msg.extra);
+              // ST-Translate-Extension: extra.display_text bevorzugen wenn vorhanden,
+              // sonst Fallback auf raw msg.mes.
+              const displayed = getDisplayText(msg);
+              if (displayed.trim()) {
+                const split = resolveThinking(displayed.trim(), msg.extra);
                 thinkingText = split.thinking;
                 thinkingDurationMs = split.durationMs;
                 finalText = split.visible;
@@ -401,8 +404,10 @@ export async function handleUserMessage(data) {
     for (let i = chat.length - 1; i >= 0; i--) {
       const msg = chat[i];
       if (msg.is_user) break;
-      if (msg.mes?.trim()) {
-        const split = resolveThinking(msg.mes.trim(), msg.extra);
+      // ST-Translate-Extension: extra.display_text bevorzugen wenn vorhanden.
+      const displayed = getDisplayText(msg);
+      if (displayed.trim()) {
+        const split = resolveThinking(displayed.trim(), msg.extra);
         const { cleanText, beats } = extractAndStripVisualBeats(split.visible);
         aiMessages.unshift({
           name: msg.name || '',
@@ -689,7 +694,10 @@ export async function handleExecuteCommand(data) {
           .filter(({ msg, i }) => msg && (!hasSince || i >= sinceIndex));
 
         const messages = await Promise.all(slice.map(async ({ msg, i }) => {
-          const content = msg.mes ?? '';
+          // ST-Translate-Extension: extra.display_text bevorzugen wenn vorhanden,
+          // sonst Fallback auf raw msg.mes. So wird der vom User gesehene Text
+          // gespiegelt — nicht die englische Originalversion.
+          const content = getDisplayText(msg);
           const hash = await computeHash(content);
           return {
             idx: i,
@@ -698,6 +706,7 @@ export async function handleExecuteCommand(data) {
             name: msg.name ?? '',
             hash,
             extra: msg.extra ?? null,
+            send_date: msg.send_date ?? null,
           };
         }));
 
