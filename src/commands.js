@@ -84,6 +84,12 @@ const GROUP_WRAPPER_FINISHED =
 const STREAM_REASONING_DONE =
   event_types.STREAM_REASONING_DONE ?? 'stream_reasoning_done';
 
+// Cap incoming `data.text` payloads from the server before forwarding them to
+// `sendMessageAsUser`. Generous enough that legitimate roleplay messages
+// (long-form prose, multi-paragraph) are not truncated, but bounded so a
+// compromised server cannot push multi-megabyte payloads into the chat.
+const MAX_USER_MESSAGE_LENGTH = 16384;
+
 // ---------------------------------------------------------------------------
 // Helper: get active character name
 // ---------------------------------------------------------------------------
@@ -141,7 +147,11 @@ export async function handleUserMessage(data) {
 
   sendTypingAction(getActiveCharName(), true, messageState.chatId);
 
-  await sendMessageAsUser(data.text);
+  const userText =
+    typeof data.text === 'string'
+      ? data.text.slice(0, MAX_USER_MESSAGE_LENGTH)
+      : String(data.text ?? '').slice(0, MAX_USER_MESSAGE_LENGTH);
+  await sendMessageAsUser(userText);
 
   let currentStreamId = null;
   let currentCharacterName = null;
