@@ -473,10 +473,21 @@ export async function handleUserMessage(data) {
     );
   };
 
-  // Assigns a new streamId at the start of each character turn
+  // Assigns a new streamId at the start of each character turn.
+  // The chatId prefix exists to make streamIds debuggable across logs; if
+  // messageState.chatId is undefined (e.g. ST mid-model-switch race), fall
+  // back to the live context's chat id, then to a stable literal — never
+  // emit `undefined-...` because the UI's bubble-reuse logic treats that as
+  // a polling-bubble candidate and may swallow a finalized greeting.
   const onGenerationStarted = () => {
-    currentStreamId = `${messageState.chatId}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
     const ctx = SillyTavern.getContext();
+    const chatIdSafe =
+      messageState.chatId ??
+      (typeof ctx.getCurrentChatId === 'function' ? ctx.getCurrentChatId() : null) ??
+      ctx.chat_metadata?.chat_id ??
+      ctx.chat_metadata?.chatId ??
+      'nochat';
+    currentStreamId = `${chatIdSafe}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
     currentCharacterName = ctx.groupId ? ctx.name2 || null : null;
     lastSentLength = 0;       // reset visible-delta baseline for each new stream
     thinkingSentLength = 0;   // reset thinking-delta baseline
