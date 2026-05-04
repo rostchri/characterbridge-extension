@@ -497,9 +497,14 @@ export async function handleUserMessage(data) {
     // Collect srcs already in DOM right now so the observer only sends new ones.
     const alreadySentSrcs = new Set(extractImageSrcsFromMesText(lastMesEl));
 
-    sendLastMessageImages(messageState.chatId).catch((err) =>
-      console.warn('[CharacterBridge] sendLastMessageImages failed:', err),
-    );
+    // sendLastMessageImages ist synchron — frueher mit .catch() umhuellt was
+    // einen TypeError warf wenn der Pfad ueberhaupt erreicht wurde (frueher
+    // durch early-return `if (!messageState.chatId) return;` verdeckt).
+    try {
+      sendLastMessageImages(messageState.chatId);
+    } catch (err) {
+      console.warn('[CharacterBridge] sendLastMessageImages failed:', err);
+    }
 
     // Resolve character name once for the observer packet.
     const obsCharName = getActiveCharName();
