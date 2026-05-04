@@ -47,17 +47,41 @@ const OBSERVER_TIMEOUT_MS = 60_000;
  * @param {Set<string>} [alreadySent] - Srcs already sent at stream_end (dedup).
  */
 export function startDelayedImageObserver(mesTextEl, chatId, charName, alreadySent = new Set()) {
-  if (!mesTextEl) return;
+  if (!mesTextEl) {
+    console.debug('[CharacterBridge:img-observer] start skipped — no element');
+    return;
+  }
 
   // Disconnect any existing observer before starting a fresh one.
   stopDelayedImageObserver();
 
   const sentSrcs = new Set(alreadySent);
 
-  const observer = new MutationObserver((mutations) => {
-    const newSrcs = _collectNewSrcs(mutations, sentSrcs);
-    if (!newSrcs.length) return;
+  console.debug('[CharacterBridge:img-observer] start', {
+    targetTag: mesTextEl.tagName,
+    targetClass: mesTextEl.getAttribute?.('class'),
+    chatId,
+    charName,
+    alreadySentCount: sentSrcs.size,
+  });
 
+  const observer = new MutationObserver((mutations) => {
+    console.debug('[CharacterBridge:img-observer] mutations', {
+      count: mutations.length,
+      types: mutations.map((m) => m.type),
+      addedNodeTags: mutations.flatMap((m) =>
+        Array.from(m.addedNodes ?? []).map(
+          (n) => `${n.tagName}.${n.getAttribute?.('class') ?? ''}`,
+        ),
+      ),
+    });
+    const newSrcs = _collectNewSrcs(mutations, sentSrcs);
+    if (!newSrcs.length) {
+      console.debug('[CharacterBridge:img-observer] no new srcs in mutation');
+      return;
+    }
+
+    console.debug('[CharacterBridge:img-observer] sending new srcs', newSrcs);
     newSrcs.forEach((src) => sentSrcs.add(src));
 
     // Fire-and-forget — failures are logged inside sendCollectedImages / image-relay.
