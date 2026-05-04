@@ -442,19 +442,26 @@ export async function handleUserMessage(data) {
     }
 
     // Forward images from the last AI message (post-generation art, etc.).
-    // After the initial send, start a MutationObserver on the .mes_text so
-    // images inserted later by auto-generation extensions are also forwarded.
-    const lastMesEl = (() => {
+    // After the initial send, start a MutationObserver on the .mes_block so
+    // images inserted later — either inline into .mes_text OR into a sibling
+    // .mes_media_wrapper (ST "Use Image Viewer in Replace Mode") — are caught.
+    const lastMesContext = (() => {
       try {
         const messages = document.querySelectorAll('#chat .mes');
         if (!messages.length) return null;
         const last = messages[messages.length - 1];
         if (last.getAttribute('is_user') === 'true') return null;
-        return last.querySelector('.mes_text') || null;
+        const mesText = last.querySelector('.mes_text') || null;
+        // Observe the parent .mes_block (or .mes if no block wrapper) so
+        // mutations in the sibling .mes_media_wrapper are also detected.
+        const observerRoot = mesText?.parentElement ?? mesText;
+        return { mesText, observerRoot };
       } catch {
         return null;
       }
     })();
+    const lastMesEl = lastMesContext?.mesText ?? null;
+    const observerRoot = lastMesContext?.observerRoot ?? null;
 
     // Collect srcs already in DOM right now so the observer only sends new ones.
     const alreadySentSrcs = new Set(extractImageSrcsFromMesText(lastMesEl));
@@ -466,7 +473,7 @@ export async function handleUserMessage(data) {
     // Resolve character name once for the observer packet.
     const obsCharName = getActiveCharName();
     startDelayedImageObserver(
-      lastMesEl,
+      observerRoot,
       messageState.chatId,
       obsCharName,
       alreadySentSrcs,

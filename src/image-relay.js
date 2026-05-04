@@ -165,17 +165,37 @@ export function resolveImagePayload(src) {
 // ---------------------------------------------------------------------------
 
 /**
- * Returns the raw src values of all images in a .mes_text element.
+ * Returns the raw src values of all images attached to a message.
+ *
+ * Walks both the inline <img> tags inside the .mes_text element AND any
+ * sibling .mes_media_wrapper container that ST creates when "Use Image
+ * Viewer in Replace Mode" is enabled. In that mode ST inserts the image
+ * into a separate wrapper next to .mes_text instead of inline — without
+ * this fallback the bridge never sees the image URL.
+ *
  * Unresolved so classifyImageSrc can operate on the original strings.
  *
- * @param {Element} mesTextEl
+ * @param {Element} mesTextEl  The .mes_text element of the message.
  * @returns {string[]}
  */
 export function extractImageSrcsFromMesText(mesTextEl) {
   if (!mesTextEl) return [];
-  return Array.from(mesTextEl.querySelectorAll("img"))
+  const srcs = Array.from(mesTextEl.querySelectorAll("img"))
     .map((img) => img.getAttribute("src"))
     .filter(Boolean);
+  // Image-Viewer-Mode: ST renders generated images into a sibling
+  // .mes_media_wrapper container; walk it via the parent.
+  const mesBlock = mesTextEl.parentElement;
+  const mediaWrapper = mesBlock
+    ? mesBlock.querySelector(":scope > .mes_media_wrapper")
+    : null;
+  if (mediaWrapper) {
+    for (const img of mediaWrapper.querySelectorAll("img")) {
+      const src = img.getAttribute("src");
+      if (src) srcs.push(src);
+    }
+  }
+  return srcs;
 }
 
 /**
