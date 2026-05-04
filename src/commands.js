@@ -423,7 +423,17 @@ export async function handleUserMessage(data) {
       });
     }
     const { chat } = ctx;
-    if (!chat || chat.length < 2) return;
+    console.debug('[CharacterBridge] collectAndSendReplies entered', {
+      chatLen: chat?.length,
+      chatId: messageState.chatId,
+      streamedAny: messageState.streamedAny,
+    });
+    if (!chat || chat.length < 2) {
+      console.debug('[CharacterBridge] collectAndSendReplies bail — chat too short', {
+        chatLen: chat?.length,
+      });
+      return;
+    }
 
     const aiMessages = [];
     for (let i = chat.length - 1; i >= 0; i--) {
@@ -478,6 +488,12 @@ export async function handleUserMessage(data) {
     const lastMesEl = lastMesContext?.mesText ?? null;
     const observerRoot = lastMesContext?.observerRoot ?? null;
 
+    console.debug('[CharacterBridge] collectAndSendReplies image-setup', {
+      hasMesText: !!lastMesEl,
+      hasObserverRoot: !!observerRoot,
+      observerRootClass: observerRoot?.getAttribute?.('class'),
+    });
+
     // Collect srcs already in DOM right now so the observer only sends new ones.
     const alreadySentSrcs = new Set(extractImageSrcsFromMesText(lastMesEl));
 
@@ -487,6 +503,12 @@ export async function handleUserMessage(data) {
 
     // Resolve character name once for the observer packet.
     const obsCharName = getActiveCharName();
+    console.debug('[CharacterBridge] about to start img-observer', {
+      observerRoot: !!observerRoot,
+      chatId: messageState.chatId,
+      charName: obsCharName,
+      alreadySentCount: alreadySentSrcs.size,
+    });
     startDelayedImageObserver(
       observerRoot,
       messageState.chatId,
