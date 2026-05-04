@@ -27,7 +27,11 @@ import { collectImages, sendCollectedImages } from './image-relay.js';
 /** @type {{ observer: MutationObserver, timer: ReturnType<typeof setTimeout> }|null} */
 let _active = null;
 
-const OBSERVER_TIMEOUT_MS = 60_000;
+// Image-Generation kann je nach Provider und Modell mehrere Minuten
+// dauern (custom-civitai mit hoher CFG, lokale SD ohne GPU-Boost, etc.).
+// Defensiver Sicherheits-Cap statt enger Timeout — der Observer wird
+// ohnehin beim naechsten User-Turn (MESSAGE_SENT) sauber disconnected.
+const OBSERVER_TIMEOUT_MS = 600_000; // 10min
 
 // ---------------------------------------------------------------------------
 // Public API
