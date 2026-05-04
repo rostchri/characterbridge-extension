@@ -406,8 +406,23 @@ export async function handleUserMessage(data) {
   // Collects all consecutive AI messages since the last user turn and sends
   // them as a single ai_reply payload. Also forwards any embedded images.
   const collectAndSendReplies = () => {
-    if (!messageState.chatId) return;
-    const { chat } = SillyTavern.getContext();
+    // chatId-Fallback (analog zu onGenerationStarted): wenn der Server kein
+    // chatId mitsendet, ziehen wir es aus dem aktiven ST-Kontext. Der frueher
+    // hier stehende `if (!messageState.chatId) return;` blockierte nicht nur
+    // sendAiReply sondern auch den startDelayedImageObserver — Bilder vom
+    // Auto-Generation-Plugin gingen verloren sobald data.chatId undefined war.
+    const ctx = SillyTavern.getContext();
+    if (!messageState.chatId) {
+      messageState.chatId =
+        (typeof ctx.getCurrentChatId === 'function' ? ctx.getCurrentChatId() : null) ??
+        ctx.chat_metadata?.chat_id ??
+        ctx.chat_metadata?.chatId ??
+        'nochat';
+      console.debug('[CharacterBridge] collectAndSendReplies chatId-Fallback', {
+        resolved: messageState.chatId,
+      });
+    }
+    const { chat } = ctx;
     if (!chat || chat.length < 2) return;
 
     const aiMessages = [];
