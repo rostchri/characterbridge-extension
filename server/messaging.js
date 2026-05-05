@@ -26,6 +26,8 @@
 
 const https = require("https");
 const http = require("http");
+const dns = require("dns");
+const net = require("net");
 const path = require("path");
 const { AttachmentBuilder } = require("discord.js");
 const { Jimp } = require("jimp");
@@ -52,6 +54,98 @@ const DISCORD_IMAGE_MAX_WIDTH = 2048;
 
 /** Maximum number of file attachments per Discord message. */
 const DISCORD_ATTACHMENTS_PER_MESSAGE = 10;
+
+// ---------------------------------------------------------------------------
+// SSRF protection (#1939)
+// ---------------------------------------------------------------------------
+
+/**
+ * Returns true if the given IP address belongs to a private, loopback,
+ * link-local, or other non-routable range that must not be reachable via
+ * an externally triggered fetch.
+ *
+ * Covers:
+ *   - IPv4 loopback:       127.0.0.0/8
+ *   - IPv4 private:        10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16
+ *   - IPv4 link-local:     169.254.0.0/16
+ *   - IPv4 CGNAT:          100.64.0.0/10
+ *   - IPv4 broadcast:      255.255.255.255
+ *   - IPv6 loopback:       ::1
+ *   - IPv6 link-local:     fe80::/10
+ *   - IPv6 unique-local:   fc00::/7
+ *
+ * @param {string} ip
+ * @returns {boolean}
+ */
+function isPrivateIp(ip) {
+  if (!ip) return true; // treat unresolvable as blocked
+
+  // IPv6 loopback
+  if (ip === "::1") return true;
+
+  // IPv6 link-local (fe80::/10) and unique-local (fc00::/7)
+  if (/^fe[89ab][0-9a-f]:/i.test(ip)) return true;  // link-local fe80–febf
+  if (/^f[cd][0-9a-f]{2}:/i.test(ip)) return true;  // unique-local fc00–fdff
+
+  if (!net.isIPv4(ip)) return false; // non-matching IPv6 — allow
+
+  const parts = ip.split(".").map(Number);
+  const [a, b] = parts;
+
+  if (a === 127) return true;                           // loopback
+  if (a === 10) return true;                            // 10.0.0.0/8
+  if (a === 172 && b >= 16 && b <= 31) return true;    // 172.16.0.0/12
+  if (a === 192 && b === 168) return true;              // 192.168.0.0/16
+  if (a === 169 && b === 254) return true;              // link-local
+  if (a === 100 && b >= 64 && b <= 127) return true;   // CGNAT 100.64.0.0/10
+  if (a === 255 && ip === "255.255.255.255") return true;
+
+  return false;
+}
+
+/**
+ * Resolves the hostname in `url` via DNS and rejects with an error if the
+ * resolved IP falls within a private/non-routable range (SSRF guard).
+ *
+ * @param {string} url
+ * @returns {Promise<void>}
+ */
+function assertNotPrivateHost(url) {
+  return new Promise((resolve, reject) => {
+    let parsed;
+    try {
+      parsed = new URL(url);
+    } catch {
+      reject(new Error(`SSRF guard: invalid URL "${url}"`));
+      return;
+    }
+
+    const hostname = parsed.hostname;
+
+    // Reject bare IP addresses that are private without a DNS lookup.
+    if (net.isIP(hostname)) {
+      if (isPrivateIp(hostname)) {
+        reject(new Error(`SSRF guard: direct IP "${hostname}" is a private address`));
+      } else {
+        resolve();
+      }
+      return;
+    }
+
+    dns.lookup(hostname, { family: 4 }, (err, address) => {
+      if (err) {
+        // DNS failure — refuse rather than allow (fail-closed).
+        reject(new Error(`SSRF guard: DNS lookup failed for "${hostname}": ${err.message}`));
+        return;
+      }
+      if (isPrivateIp(address)) {
+        reject(new Error(`SSRF guard: "${hostname}" resolves to private IP "${address}"`));
+        return;
+      }
+      resolve();
+    });
+  });
+}
 
 /**
  * Splits text exceeding Discord's 2000-char limit across multiple messages,
@@ -110,13 +204,15 @@ async function processImageForDiscord(buffer) {
 
 /**
  * Fetches a remote image URL into a Buffer. Follows up to 5 redirects.
- * Times out after 15 seconds.
+ * Times out after 15 seconds. Performs SSRF protection by resolving the
+ * hostname and rejecting private/non-routable IPs (#1939).
  *
  * @param {string} url
  * @param {number} [redirectsLeft=5]
  * @returns {Promise<{buffer: Buffer, contentType: string}>}
  */
-function fetchImageBuffer(url, redirectsLeft = 5) {
+async function fetchImageBuffer(url, redirectsLeft = 5) {
+  await assertNotPrivateHost(url);
   return new Promise((resolve, reject) => {
     const lib = url.startsWith("https://") ? https : http;
     lib
