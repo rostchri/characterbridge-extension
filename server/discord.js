@@ -50,7 +50,7 @@ const {
   getFrontend,
   parseRoute,
 } = require("./frontend-manager");
-const { streamSessions, scheduleEdit } = require("./streaming");
+const { streamSessions, scheduleEdit, STREAM_SESSION_TTL_MS } = require("./streaming");
 const {
   getPersonaForUser,
   getDefaultPersonaName,
@@ -779,6 +779,13 @@ async function streamChunk(channelId, payload) {
   }
 
   if (!streamSessions[streamId]) {
+    // TTL watchdog: remove the session if stream_end never arrives (#1931).
+    const cleanupTimer = setTimeout(() => {
+      if (streamSessions[streamId]) {
+        log("warn", `[Stream] Session ${streamId} expired without stream_end — removing`);
+        delete streamSessions[streamId];
+      }
+    }, STREAM_SESSION_TTL_MS);
     streamSessions[streamId] = {
       streamMessage: null,
       pendingText: "",
@@ -787,6 +794,7 @@ async function streamChunk(channelId, payload) {
       nextEdit: false,
       lastEditAt: 0,
       streamDone: false,
+      cleanupTimer,
     };
   }
 
@@ -836,6 +844,9 @@ async function streamEnd(channelId, payload) {
     await sendLong(channel, finalText);
   }
 
+  // Cancel the TTL watchdog before removing the session so it does not
+  // fire after stream_end has already cleaned up (#1931).
+  clearTimeout(s.cleanupTimer);
   delete streamSessions[streamId];
   return true;
 }

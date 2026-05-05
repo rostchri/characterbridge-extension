@@ -31,7 +31,16 @@ const STREAM_THROTTLE_MS = 1200;
 const DISCORD_MESSAGE_MAX_CHARS = 2000;
 
 /**
+ * TTL for orphaned stream sessions that never received a stream_end.
+ * If a stream is aborted (connection drop, user cancel without stream_end),
+ * the session would leak indefinitely.  This cap ensures cleanup (#1931).
+ */
+const STREAM_SESSION_TTL_MS = 5 * 60 * 1000; // 5 minutes
+
+/**
  * Active stream sessions, keyed by streamId.
+ * Each session also carries a `cleanupTimer` handle so orphaned sessions
+ * (no stream_end received) are removed after STREAM_SESSION_TTL_MS.
  * @type {Record<string, {
  *   streamMessage: import("discord.js").Message|null,
  *   pendingText: string,
@@ -39,7 +48,8 @@ const DISCORD_MESSAGE_MAX_CHARS = 2000;
  *   editInFlight: boolean,
  *   nextEdit: boolean,
  *   lastEditAt: number,
- *   streamDone: boolean
+ *   streamDone: boolean,
+ *   cleanupTimer: ReturnType<typeof setTimeout>
  * }>}
  */
 const streamSessions = {};
@@ -120,6 +130,7 @@ function scheduleEdit(session, channel, streamId) {
 
 module.exports = {
   STREAM_THROTTLE_MS,
+  STREAM_SESSION_TTL_MS,
   streamSessions,
   streamHandled,
   pendingImageMessages,

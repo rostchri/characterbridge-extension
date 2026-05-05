@@ -384,6 +384,8 @@ function acceptConnection(ws) {
     setBridgeActivity(null);
 
     for (const key of Object.keys(streamSessions)) {
+      // Cancel the TTL watchdog before deleting so it cannot fire after cleanup.
+      clearTimeout(streamSessions[key].cleanupTimer);
       delete streamSessions[key];
     }
     streamHandled.clear();
