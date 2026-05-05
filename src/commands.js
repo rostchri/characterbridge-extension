@@ -588,10 +588,9 @@ export async function handleUserMessage(data) {
   eventSource.on(GROUP_WRAPPER_FINISHED, onGroupFinished);
 
   // User aborted - clean up without sending a reply.
-  // Self-removing wrapper: behaves like once() but is registered via on() so
-  // that removeListener() in removeAllListeners() reliably finds the handler.
+  // removeAllListeners() already de-registers GENERATION_STOPPED, so no
+  // extra removeListener call here — avoids the double-removal (#1886).
   const onGenerationStopped = () => {
-    eventSource.removeListener(event_types.GENERATION_STOPPED, onGenerationStopped);
     removeAllListeners();
     flushStreamEnd();
   };
