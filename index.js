@@ -61,6 +61,7 @@ import { sharedState } from './src/state.js';
 import {
   resetExpressionSignature,
   setupExpressionObserver,
+  stopExpressionObserver,
   scheduleExpressionUpdate,
 } from './src/expression-relay.js';
 import {
@@ -226,6 +227,8 @@ jQuery(async () => {
     $('#chatroom_disconnect_button').on('click', () => {
       stopInventoryWatcher();
       stopHashPolling();
+      stopChatStateRelay();
+      stopExpressionObserver();
       disconnect();
     });
 

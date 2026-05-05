@@ -196,3 +196,21 @@ export function setupExpressionObserver() {
   // Push initial state when connected and observer starts.
   scheduleExpressionUpdate();
 }
+
+/**
+ * Disconnects the MutationObserver watching the expression image element and
+ * cancels any pending debounce timer.
+ *
+ * Safe to call when no observer is active (idempotent).  Must be called on
+ * disconnect so the observer does not linger after the WS connection closes.
+ */
+export function stopExpressionObserver() {
+  if (expressionDebounceTimer) {
+    clearTimeout(expressionDebounceTimer);
+    expressionDebounceTimer = null;
+  }
+  if (expressionObserver) {
+    expressionObserver.disconnect();
+    expressionObserver = null;
+  }
+}
