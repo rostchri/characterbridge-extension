@@ -82,8 +82,11 @@ import { eventSource, event_types } from '../../../../script.js';
 // ---------------------------------------------------------------------------
 
 // String fallback covers older ST versions that do not export APP_READY.
+// Use once() so tryResume is not called again on subsequent reloads/hot-patches
+// that re-emit APP_READY — and the listener is removed after the first fire
+// to avoid a permanent memory reference (#1890).
 const APP_READY_EVENT = event_types.APP_READY ?? 'app_ready';
-eventSource.on(APP_READY_EVENT, tryResume);
+eventSource.once(APP_READY_EVENT, tryResume);
 
 // ---------------------------------------------------------------------------
 // Inbound packet router
