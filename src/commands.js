@@ -481,7 +481,12 @@ export async function handleUserMessage(data) {
         const mesText = last.querySelector('.mes_text') || null;
         // Observe the parent .mes_block (or .mes if no block wrapper) so
         // mutations in the sibling .mes_media_wrapper are also detected.
-        const observerRoot = mesText?.parentElement ?? mesText;
+        // Guard: mesText.parentElement may be null when the element is detached
+        // from the DOM; fall back to mesText itself.  When mesText is null the
+        // entire observerRoot must also be null (#1889).
+        const observerRoot = mesText
+          ? (mesText.parentElement ?? mesText)
+          : null;
         return { mesText, observerRoot };
       } catch {
         return null;
