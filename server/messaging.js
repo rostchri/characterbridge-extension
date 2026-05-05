@@ -31,6 +31,28 @@ const { AttachmentBuilder } = require("discord.js");
 const { Jimp } = require("jimp");
 const { log } = require("./logger");
 
+// ---------------------------------------------------------------------------
+// Discord platform limits (#1934)
+// ---------------------------------------------------------------------------
+
+/** Maximum characters per Discord message (API hard limit). */
+const DISCORD_MESSAGE_MAX_CHARS = 2000;
+
+/** Split threshold for sendLong: leave 100 chars of margin below the API limit. */
+const DISCORD_SPLIT_THRESHOLD = 1900;
+
+/** Discord's advertised file upload limit per message (8 MB). */
+const DISCORD_UPLOAD_LIMIT_BYTES = 8 * 1024 * 1024;
+
+/** Conservative upload target (7.8 MB) to stay safely below the hard limit. */
+const DISCORD_UPLOAD_TARGET_BYTES = 7.8 * 1024 * 1024;
+
+/** Maximum image width when resizing an oversized attachment (pixels). */
+const DISCORD_IMAGE_MAX_WIDTH = 2048;
+
+/** Maximum number of file attachments per Discord message. */
+const DISCORD_ATTACHMENTS_PER_MESSAGE = 10;
+
 /**
  * Splits text exceeding Discord's 2000-char limit across multiple messages,
  * preferring paragraph then word boundaries.
@@ -39,7 +61,7 @@ const { log } = require("./logger");
  * @param {string} text
  */
 async function sendLong(channel, text) {
-  const MAX = 1900;
+  const MAX = DISCORD_SPLIT_THRESHOLD;
   let remaining = text;
   let lastMessage = null;
   while (remaining.length > 0) {
@@ -64,8 +86,7 @@ async function sendLong(channel, text) {
  * @returns {Promise<Buffer>}
  */
 async function processImageForDiscord(buffer) {
-  const DISCORD_LIMIT = 7.8 * 1024 * 1024;
-  if (buffer.length <= DISCORD_LIMIT) return buffer;
+  if (buffer.length <= DISCORD_UPLOAD_TARGET_BYTES) return buffer;
 
   log(
     "log",
@@ -74,7 +95,7 @@ async function processImageForDiscord(buffer) {
 
   try {
     const image = await Jimp.read(buffer);
-    if (image.bitmap.width > 2048) image.resize({ w: 2048 });
+    if (image.bitmap.width > DISCORD_IMAGE_MAX_WIDTH) image.resize({ w: DISCORD_IMAGE_MAX_WIDTH });
     const optimized = await image.getBuffer("image/jpeg", { quality: 80 });
     log(
       "log",
@@ -207,7 +228,7 @@ async function sendImagesToChannel(channel, images, caption) {
     return;
   }
 
-  const BATCH = 10;
+  const BATCH = DISCORD_ATTACHMENTS_PER_MESSAGE;
   for (let i = 0; i < attachments.length; i += BATCH) {
     const batch = attachments.slice(i, i + BATCH);
     const payload = { files: batch };

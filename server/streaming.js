@@ -27,6 +27,9 @@ const { log } = require("./logger");
 // Discord allows roughly 5 edits per 5 seconds; 1200 ms provides a safe margin.
 const STREAM_THROTTLE_MS = 1200;
 
+/** Discord hard character limit per message. */
+const DISCORD_MESSAGE_MAX_CHARS = 2000;
+
 /**
  * Active stream sessions, keyed by streamId.
  * @type {Record<string, {
@@ -82,10 +85,10 @@ function scheduleEdit(session, channel, streamId) {
       ? `**${session.characterName}**\n${text}`
       : text;
 
-    // Live preview only: truncate at 2000 chars if mid-sentence. stream_end
-    // posts the full final text via sendLong regardless of length.
-    if (displayText.length > 2000) {
-      displayText = displayText.slice(0, 1999) + "…";
+    // Live preview only: truncate at DISCORD_MESSAGE_MAX_CHARS if mid-sentence.
+    // stream_end posts the full final text via sendLong regardless of length.
+    if (displayText.length > DISCORD_MESSAGE_MAX_CHARS) {
+      displayText = displayText.slice(0, DISCORD_MESSAGE_MAX_CHARS - 1) + "…";
     }
 
     try {
