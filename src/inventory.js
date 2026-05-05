@@ -157,10 +157,14 @@ function computeFingerprint() {
  * Starts a polling watcher that detects changes in the character/persona
  * roster and sends inventory_update packets when changes are detected.
  *
- * Uses sendInventoryUpdate from chatroom-client for correct packet type
- * (inventory_update) and snake_case field names (ai_character / personas / metadata).
+ * @param {((inventory: {bots: Array, personas: Array, metadata: object}) => void) | null} [onUpdate]
+ *   Optional callback invoked with the new inventory whenever a change is
+ *   detected.  When provided, this callback is responsible for sending the
+ *   packet (DI pattern — caller decides the transport).  When omitted, the
+ *   watcher falls back to calling sendInventoryUpdate() directly so callers
+ *   that do not inject a callback still work without modification.
  */
-export function startInventoryWatcher() {
+export function startInventoryWatcher(onUpdate = null) {
   stopInventoryWatcher();
   _lastFingerprint = computeFingerprint();
 
@@ -170,7 +174,11 @@ export function startInventoryWatcher() {
       _lastFingerprint = newFingerprint;
       try {
         const inventory = collectInventory();
-        sendInventoryUpdate(inventory);
+        if (typeof onUpdate === 'function') {
+          onUpdate(inventory);
+        } else {
+          sendInventoryUpdate(inventory);
+        }
       } catch (err) {
         console.warn("[CharacterBridge] Inventory watcher update failed:", err);
       }
