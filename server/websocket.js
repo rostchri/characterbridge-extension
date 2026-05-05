@@ -233,13 +233,82 @@ pluginLoader.start().catch((err) => {
   log('error', `[Plugins] Failed to start plugin: ${err.message}`);
 });
 
+// ---------------------------------------------------------------------------
+// Optional shared-secret for first-frame authentication.
+// Set WS_SECRET in the environment (or config.wssSecret) to require every new
+// connection to send { type: "auth", secret: "<value>" } as its very first
+// message.  When WS_SECRET is empty/absent the bridge accepts all local
+// connections (127.0.0.1 bind already restricts network exposure).
+// ---------------------------------------------------------------------------
+const WS_SECRET = process.env.WS_SECRET || config.wssSecret || '';
+
 const wss = new WebSocket.Server({
+  host: '127.0.0.1',
   port: wssPort,
   maxPayload: 50 * 1024 * 1024,
 });
-log('log', `[Bridge] WebSocket server listening on port ${wssPort}`);
+log('log', `[Bridge] WebSocket server listening on 127.0.0.1:${wssPort}`);
 
 wss.on('connection', (ws) => {
+  // ------------------------------------------------------------------
+  // First-frame authentication guard.
+  //
+  // When WS_SECRET is configured, the very first message must be a JSON
+  // object of the form { type: "auth", secret: "<WS_SECRET>" }.  Any
+  // other first message or a missing/wrong secret closes the socket
+  // immediately with code 4401 (Unauthorized).  Subsequent messages are
+  // handled normally after a successful auth handshake.
+  // ------------------------------------------------------------------
+  if (WS_SECRET) {
+    let authenticated = false;
+
+    const authHandler = (raw) => {
+      let frame;
+      try {
+        frame = JSON.parse(typeof raw === 'string' ? raw : raw.toString('utf8'));
+      } catch (_) {
+        ws.close(4401, 'Unauthorized: invalid JSON in auth frame');
+        return;
+      }
+
+      if (frame?.type !== 'auth' || frame?.secret !== WS_SECRET) {
+        log('warn', '[Bridge] WS connection rejected: wrong or missing auth secret');
+        ws.close(4401, 'Unauthorized');
+        return;
+      }
+
+      authenticated = true;
+      ws.removeListener('message', authHandler);
+      log('log', '[Bridge] WS connection authenticated');
+      // Proceed with normal connection setup.
+      acceptConnection(ws);
+    };
+
+    ws.on('message', authHandler);
+
+    // Reject if no auth frame arrives within 5 seconds.
+    const authTimeout = setTimeout(() => {
+      if (!authenticated) {
+        log('warn', '[Bridge] WS connection timed out waiting for auth frame');
+        ws.close(4401, 'Unauthorized: auth timeout');
+      }
+    }, 5_000);
+
+    ws.on('close', () => clearTimeout(authTimeout));
+    return;
+  }
+
+  // No secret configured — accept immediately.
+  acceptConnection(ws);
+});
+
+/**
+ * Completes a WebSocket connection after authentication (or when no auth is
+ * required).  Registers all message / close handlers and sends bridge_config.
+ *
+ * @param {import('ws').WebSocket} ws
+ */
+function acceptConnection(ws) {
   if (sillyTavernClient && sillyTavernClient.readyState === WebSocket.OPEN) {
     log(
       'warn',
@@ -340,6 +409,6 @@ wss.on('connection', (ws) => {
       pending.interaction.respond([]).catch(() => {});
     }
   });
-});
+}
 
 module.exports = { getSillyTavernClient, dispatchCommand };
