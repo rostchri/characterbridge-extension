@@ -5,35 +5,68 @@
  * Licensed under the MIT License.
  * See /server/LICENSE for full license information.
  *
- * Thin wrapper around console that suppresses debug-level output in production.
- * Set debug: true in config.js to enable verbose logging.
+ * Structured JSON logger: emits one JSON object per line to stderr so that
+ * log-collectors such as Vector and VictoriaLogs can parse entries without
+ * grok/regex heuristics.
+ *
+ * Line format (ndjson):
+ *   {"ts":"<ISO-8601>","level":"<level>","msg":"<text>"}
+ *
+ * Set debug: true in config.js to enable verbose (level "debug") output.
+ * The LOG_LEVEL environment variable overrides config.debug:
+ *   LOG_LEVEL=debug  — enable debug output
+ *   LOG_LEVEL=warn   — suppress log/info, show warn+error only
+ *   LOG_LEVEL=error  — only errors
  */
 
 "use strict";
 
 const { config } = require("./config-loader");
 
+// Numeric severity map — lower is noisier.
+const SEVERITY = { debug: 10, log: 20, info: 20, warn: 30, error: 40 };
+
+/** Effective minimum severity level derived from env + config. */
+function _minSeverity() {
+  const envLevel = (process.env.LOG_LEVEL || "").toLowerCase().trim();
+  if (envLevel && SEVERITY[envLevel] !== undefined) {
+    return SEVERITY[envLevel];
+  }
+  return config.debug ? SEVERITY.debug : SEVERITY.warn;
+}
+
 /**
- * @param {"log"|"warn"|"error"} level
- * @param {...any} args
+ * Emits a structured JSON log line to stderr.
+ *
+ * @param {"debug"|"log"|"info"|"warn"|"error"} level
+ * @param {...any} args  String message parts; objects are JSON-serialised inline.
  */
 function log(level, ...args) {
-  if (level === "log" && !config.debug) return;
+  const effectiveLevel = SEVERITY[level] ?? SEVERITY.log;
+  if (effectiveLevel < _minSeverity()) return;
 
-  const timestamp = new Date().toLocaleString(config.locale || undefined, {
-    timeZone: config.timezone || "UTC",
+  // Serialise each argument to a string, joining with a space — mirrors the
+  // behaviour of console.log so callers need no changes.
+  const msg = args
+    .map((a) => {
+      if (typeof a === "string") return a;
+      try {
+        return JSON.stringify(a);
+      } catch {
+        return String(a);
+      }
+    })
+    .join(" ");
+
+  const entry = JSON.stringify({
+    ts: new Date().toISOString(),
+    level: level === "log" ? "info" : level,
+    msg,
   });
 
-  switch (level) {
-    case "error":
-      console.error(`[${timestamp}]`, ...args);
-      break;
-    case "warn":
-      console.warn(`[${timestamp}]`, ...args);
-      break;
-    default:
-      console.log(`[${timestamp}]`, ...args);
-  }
+  // All log output goes to stderr so it stays separate from any stdout data
+  // and is picked up by Vector's file/stdin source without payload mixing.
+  process.stderr.write(entry + "\n");
 }
 
 module.exports = { log };
