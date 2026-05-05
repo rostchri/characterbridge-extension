@@ -733,9 +733,9 @@ export async function handleExecuteCommand(data) {
       }
 
       case "continue": {
-        try {
-          executeSlashCommandsWithOptions("/continue").catch(() => {});
-        } catch (_) {}
+        // Await and propagate errors so the outer catch block can report them
+        // back to the user (#1882 — silent rescue suppressed user-visible feedback).
+        await executeSlashCommandsWithOptions("/continue");
         break;
       }
 
