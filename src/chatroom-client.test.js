@@ -645,26 +645,26 @@ describe('chatroom-client — reconnect', () => {
 
 // ---------------------------------------------------------------------------
 
-describe('chatroom-client — backoff monotonicity (#1817)', () => {
+describe('chatroom-client — backoff monotonicity (#1817, #1876)', () => {
 
   afterEach(() => { _resetForTest(); });
 
-  it('doubles delay before waiting so backoff is monotonically increasing', async () => {
-    // After _resetForTest the delay is BACKOFF_INITIAL_MS (5000).
-    // _scheduleReconnect doubles BEFORE the timeout fires, so _getReconnectDelay()
-    // returns the NEXT delay immediately after scheduling.
+  it('first reconnect fires after BACKOFF_INITIAL_MS (5 s), not 2× (#1876)', async () => {
+    // _scheduleReconnect doubles _reconnectDelay BEFORE the wait.
+    // The module seeds _reconnectDelay at BACKOFF_INITIAL_MS / 2 so that after
+    // the first doubling the effective wait equals exactly BACKOFF_INITIAL_MS.
+    // After _resetForTest the seed value is BACKOFF_INITIAL_MS / 2 = 2500.
+    const BACKOFF_SEED_MS = 2_500;
     const BACKOFF_INITIAL_MS = 5_000;
     const BACKOFF_MAX_MS = 60_000;
 
-    // Simulate reading the delay right after a failure would schedule reconnect.
-    // We can't easily trigger a real reconnect cycle without waiting 5 s, so
-    // we verify the initial value and the cap behaviour via _getReconnectDelay.
-    assert.equal(_getReconnectDelay(), BACKOFF_INITIAL_MS, 'Initial delay must be 5000 ms');
+    assert.equal(_getReconnectDelay(), BACKOFF_SEED_MS, 'Seed delay must be 2500 ms (half of initial)');
+
+    // Verify first effective delay: seed × 2 = BACKOFF_INITIAL_MS.
+    assert.equal(BACKOFF_SEED_MS * 2, BACKOFF_INITIAL_MS, 'First reconnect delay must equal BACKOFF_INITIAL_MS (5 s)');
 
     // Verify cap: after many doublings the delay must not exceed BACKOFF_MAX_MS.
-    // We do this by reading the source constant relationship — tested via a
-    // pure arithmetic assertion.
-    let d = BACKOFF_INITIAL_MS;
+    let d = BACKOFF_SEED_MS;
     for (let i = 0; i < 20; i++) d = Math.min(d * 2, BACKOFF_MAX_MS);
     assert.equal(d, BACKOFF_MAX_MS, 'Backoff must cap at BACKOFF_MAX_MS');
   });

@@ -58,6 +58,10 @@ const HEARTBEAT_INTERVAL_MS = 30_000;
 const HEARTBEAT_TIMEOUT_MS = 90_000;
 const BACKOFF_INITIAL_MS = 5_000;
 const BACKOFF_MAX_MS = 60_000;
+// _scheduleReconnect doubles _reconnectDelay before each wait, so we seed it
+// at half the initial value to ensure the first reconnect fires after exactly
+// BACKOFF_INITIAL_MS (not 2 × BACKOFF_INITIAL_MS).  Sequence: 5s → 10s → 20s → 40s → 60s.
+const BACKOFF_SEED_MS = BACKOFF_INITIAL_MS / 2;
 
 // ---------------------------------------------------------------------------
 // Module-private state
@@ -69,7 +73,7 @@ let _ws = null;
 let _authenticated = false;
 let _shouldReconnect = false;
 let _reconnectTimer = null;
-let _reconnectDelay = BACKOFF_INITIAL_MS;
+let _reconnectDelay = BACKOFF_SEED_MS;
 let _heartbeatTimer = null;
 let _pongDeadlineTimer = null;
 let _lastPongAt = 0;
@@ -694,7 +698,7 @@ export function _resetForTest() {
   if (_reconnectTimer) { clearTimeout(_reconnectTimer); _reconnectTimer = null; }
   _authenticated = false;
   _shouldReconnect = false;
-  _reconnectDelay = BACKOFF_INITIAL_MS;
+  _reconnectDelay = BACKOFF_SEED_MS;
   _lastPongAt = 0;
   chatroomConnectionState.isConnected = false;
   chatroomConnectionState.lastError = null;
