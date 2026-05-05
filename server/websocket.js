@@ -411,4 +411,14 @@ function acceptConnection(ws) {
   });
 }
 
-module.exports = { getSillyTavernClient, dispatchCommand };
+/**
+ * Closes the WebSocket server and invokes `callback` when all connections
+ * have been terminated.  Used by the graceful-shutdown handler in server.js.
+ *
+ * @param {() => void} [callback]
+ */
+function closeServer(callback) {
+  wss.close(callback);
+}
+
+module.exports = { getSillyTavernClient, dispatchCommand, closeServer };

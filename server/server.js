@@ -78,3 +78,72 @@ require("./streaming");
 require("./client");
 require("./discord");
 require("./websocket");
+
+// ---------------------------------------------------------------------------
+// Process-level safety nets
+//
+// unhandledRejection: log and exit(1) — silent swallowing hides bugs and leaves
+//   the process in an undefined state.  A clean exit with a logged stack trace
+//   makes crash-loop protection (above) effective.
+//
+// uncaughtException: same — log then exit(1).  The domain/try-catch inside each
+//   module should prevent most of these, but we keep this as the last line of
+//   defence so the process never hangs in a corrupted state.
+//
+// SIGTERM / SIGINT: attempt a graceful shutdown (close WS server, destroy the
+//   Discord client) with a 10 s hard-kill timeout so a container stop does not
+//   stall indefinitely.
+// ---------------------------------------------------------------------------
+
+const { log } = require("./logger");
+
+process.on("unhandledRejection", (reason) => {
+  log("error", "[Process] Unhandled promise rejection:", reason);
+  process.exit(1);
+});
+
+process.on("uncaughtException", (err) => {
+  log("error", "[Process] Uncaught exception:", err);
+  process.exit(1);
+});
+
+async function gracefulShutdown(signal) {
+  log("log", `[Process] ${signal} received — starting graceful shutdown`);
+
+  // Hard-kill after 10 s in case close() callbacks hang.
+  const hardKillTimer = setTimeout(() => {
+    log("warn", "[Process] Graceful shutdown timed out — forcing exit");
+    process.exit(1);
+  }, 10_000);
+  // Prevent the timer from keeping the event loop alive past the shutdown.
+  if (hardKillTimer.unref) hardKillTimer.unref();
+
+  try {
+    // Close the WebSocket server so no new connections are accepted and all
+    // current clients receive a close frame.
+    const { default: wssModule } = await Promise.resolve().then(() =>
+      require("./websocket"),
+    );
+    if (wssModule && typeof wssModule.closeServer === "function") {
+      await new Promise((resolve) => wssModule.closeServer(resolve));
+    }
+  } catch (err) {
+    log("warn", "[Process] Error closing WebSocket server:", err.message);
+  }
+
+  try {
+    const discordClient = require("./client").client;
+    if (discordClient && typeof discordClient.destroy === "function") {
+      await discordClient.destroy();
+    }
+  } catch (err) {
+    log("warn", "[Process] Error destroying Discord client:", err.message);
+  }
+
+  clearTimeout(hardKillTimer);
+  log("log", "[Process] Graceful shutdown complete");
+  process.exit(0);
+}
+
+process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
+process.on("SIGINT",  () => gracefulShutdown("SIGINT"));
