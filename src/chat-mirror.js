@@ -56,6 +56,19 @@ const TAIL_LENGTH = 5;
 let _pollTimer = null;
 
 /**
+ * Debounce timer for immediate-recheck events (MESSAGE_RECEIVED / EDITED /
+ * DELETED).  Multiple events firing in rapid succession (e.g. during a batch
+ * edit or group-chat turn) collapse into a single _recheckTail() call instead
+ * of triggering a SHA-1 cascade.
+ *
+ * @type {ReturnType<typeof setTimeout>|null}
+ */
+let _eventDebounceTimer = null;
+
+/** How long to wait after the last event before running the recheck. */
+const EVENT_DEBOUNCE_MS = 100;
+
+/**
  * Last-known hashes per message index.
  * Key: message index (number), Value: hash string.
  *
@@ -155,13 +168,29 @@ function _serializeMediaForHash(extra) {
 }
 
 // ---------------------------------------------------------------------------
-// Immediate-recheck handlers
+// Immediate-recheck handlers (debounced)
 // ---------------------------------------------------------------------------
 
+/**
+ * Debounced recheck handler for ST message events.
+ *
+ * MESSAGE_RECEIVED, MESSAGE_EDITED, and MESSAGE_DELETED can fire in rapid
+ * succession (e.g. group-chat multi-turn, batch edits, or extension hooks that
+ * modify messages mid-generation).  Without debouncing, each event triggers an
+ * independent SHA-1 computation over the tail — a "SHA-1 cascade" that
+ * wastes CPU and can cause out-of-order packet delivery if the Promises resolve
+ * in non-deterministic order.
+ *
+ * Debouncing collapses all events within EVENT_DEBOUNCE_MS into a single call.
+ */
 function _onMessageEvent() {
-  _recheckTail().catch((err) =>
-    console.warn('[CharacterBridge/chat-mirror] recheck error:', err),
-  );
+  if (_eventDebounceTimer) clearTimeout(_eventDebounceTimer);
+  _eventDebounceTimer = setTimeout(() => {
+    _eventDebounceTimer = null;
+    _recheckTail().catch((err) =>
+      console.warn('[CharacterBridge/chat-mirror] recheck error:', err),
+    );
+  }, EVENT_DEBOUNCE_MS);
 }
 
 // ---------------------------------------------------------------------------
@@ -203,6 +232,13 @@ export function stopHashPolling() {
     _pollTimer = null;
   }
 
+  // Cancel any pending debounced recheck so a stopped watcher does not fire
+  // after the next reconnect's fresh setupHashPolling() call.
+  if (_eventDebounceTimer) {
+    clearTimeout(_eventDebounceTimer);
+    _eventDebounceTimer = null;
+  }
+
   try {
     const evRecv = event_types.MESSAGE_RECEIVED ?? 'message_received';
     const evEdit = event_types.MESSAGE_EDITED   ?? 'message_edited';
@@ -229,6 +265,9 @@ export function resetHashCache() {
 
 /** @returns {boolean} */
 export function _isPolling() { return _pollTimer !== null; }
+
+/** @returns {boolean} Whether a debounce timer is currently pending. */
+export function _isDebouncing() { return _eventDebounceTimer !== null; }
 
 /** @returns {Map<number, string>} */
 export function _getLastHashes() { return _lastHashes; }
