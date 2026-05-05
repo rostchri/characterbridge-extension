@@ -172,13 +172,19 @@ function _collectNewSrcs(mutations, sentSrcs) {
 /**
  * Resolves and sends a list of new image srcs to the bridge.
  *
+ * collectImages() is synchronous (URL resolution only, no fetch).
+ * The function is kept as async so its return value is a Promise and
+ * fire-and-forget callers can attach .catch() if needed.
+ *
  * @param {string}      chatId
  * @param {string|null} charName
  * @param {string[]}    srcs
+ * @returns {Promise<void>}
  */
 async function _sendNewImages(chatId, charName, srcs) {
   try {
-    const images = await collectImages(srcs);
+    // collectImages is synchronous — no await needed.
+    const images = collectImages(srcs);
     if (images.length > 0) {
       sendCollectedImages(chatId, images, null, charName);
     }
