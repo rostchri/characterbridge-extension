@@ -177,6 +177,16 @@ export function setupChatStateRelay() {
 /**
  * Removes all chat-state event listeners and clears the heartbeat timer.
  *
+ * Unregisters:
+ *   - CHAT_CHANGED    → onChatChanged
+ *   - CHARACTER_SELECTED → sendChatState
+ *   - GROUP_CHAT_CREATED → sendChatState
+ *   - 30 s setInterval heartbeat
+ *
+ * Must be called in the disconnect path (index.js Disconnect-Button) and
+ * before calling setupChatStateRelay() again on reconnect to prevent
+ * duplicate listener registrations.
+ *
  * Safe to call when no relay is active (idempotent).
  */
 export function stopChatStateRelay() {
