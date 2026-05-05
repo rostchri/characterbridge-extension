@@ -552,4 +552,32 @@ describe('delayed-image-observer — edge cases', () => {
     assert.ok(obs2._observing, 'Second observer must be active');
   });
 
+  it('#1855 - neuer Turn loescht alten TTL-Timer (Race-Bedingung)', () => {
+    // Wenn ein neuer Turn startDelayedImageObserver aufruft waehrend der
+    // 10-Minuten-Timer des Vorgaengers noch laeuft, muss der alte Timer
+    // gecancelt werden. Sonst feuert er spaeter und disconnectet den NEUEN Observer.
+    const el1 = makeMesTextEl();
+    const el2 = makeMesTextEl();
+
+    startDelayedImageObserver(el1, 'chat-1', 'Aria', new Set());
+    // Timer fuer Observer 1 ist jetzt pending.
+    assert.equal(_pendingTimers.size, 1, 'Genau ein Timer nach erstem start');
+
+    // Neuer Turn — ersetzt Observer 1 komplett.
+    startDelayedImageObserver(el2, 'chat-1', 'Aria', new Set());
+    // Alter Timer muss gecancelt sein, neuer Timer aktiv.
+    assert.equal(_pendingTimers.size, 1, 'Immer noch genau ein Timer (alter wurde gecancelt, neuer gesetzt)');
+
+    const obs1 = StubMutationObserver._instances[0];
+    const obs2 = StubMutationObserver._instances[1];
+    assert.ok(!obs1._observing, 'Alter Observer muss disconnected sein');
+    assert.ok(obs2._observing, 'Neuer Observer muss aktiv sein');
+
+    // Jetzt den verbleibenden Timer flushen — er gehoert zu Observer 2.
+    // Observer 2 muss disconnecten, Observer 1 bleibt unveraendert.
+    flushTimers();
+    assert.ok(!obs1._observing, 'Alter Observer nach TTL immer noch inaktiv');
+    assert.ok(!obs2._observing, 'Neuer Observer disconnected nach eigenem TTL');
+  });
+
 });
