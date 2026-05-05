@@ -66,6 +66,29 @@ export function sanitizeNoteArg(value) {
 }
 
 /**
+ * Resolves the active chat ID from a SillyTavern context object.
+ *
+ * SillyTavern exposes the current chat identifier through multiple paths
+ * depending on the version and whether a chat is actively loaded:
+ *   1. ctx.getCurrentChatId()  — preferred API (ST ≥ 1.12)
+ *   2. ctx.chat_metadata.chat_id — legacy field (snake_case)
+ *   3. ctx.chat_metadata.chatId  — legacy field (camelCase)
+ *   4. null                    — no chat active
+ *
+ * Centralised here to avoid 4× duplication in commands.js + chat-mirror.js
+ * (#1918).
+ *
+ * @param {{ getCurrentChatId?: () => string|null, chat_metadata?: { chat_id?: string|null, chatId?: string|null } }} ctx
+ * @returns {string|null}
+ */
+export function getCurrentChatId(ctx) {
+  return (typeof ctx.getCurrentChatId === 'function' ? ctx.getCurrentChatId() : null)
+    ?? ctx.chat_metadata?.chat_id
+    ?? ctx.chat_metadata?.chatId
+    ?? null;
+}
+
+/**
  * Returns the user-visible text of a chat message.
  *
  * SillyTavern's translation extension keeps the original message in `mes`

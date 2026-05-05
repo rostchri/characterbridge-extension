@@ -38,7 +38,7 @@
 import { eventSource, event_types } from '../../../../../script.js';
 import { sharedState } from './state.js';
 import { sendMessageChanged } from './chatroom-client.js';
-import { getDisplayText } from './utils.js';
+import { getDisplayText, getCurrentChatId } from './utils.js';
 import { computeHash } from './hash-utils.js';
 
 // ---------------------------------------------------------------------------
@@ -100,14 +100,9 @@ async function _recheckTail() {
 
   // Iter-5b Fix: lastActiveChatId wird nur ueber Command-Pakete gesetzt.
   // Bei reinem Hash-Polling ohne Commands bleibt es null → Backend skipt
-  // den Broadcast still wegen nil-Guard. Fallback auf Context-API +
-  // chat_metadata, damit der ST-Chat-Identifier in jedem Fall mitlaeuft.
-  const chatId =
-    sharedState.lastActiveChatId ??
-    (typeof ctx.getCurrentChatId === 'function' ? ctx.getCurrentChatId() : null) ??
-    ctx.chat_metadata?.chat_id ??
-    ctx.chat_metadata?.chatId ??
-    null;
+  // den Broadcast still wegen nil-Guard. Fallback via geteilten Helper
+  // (#1918).
+  const chatId = sharedState.lastActiveChatId ?? getCurrentChatId(ctx);
   if (!chatId) return;
   const startIdx = Math.max(0, chat.length - TAIL_LENGTH);
 

@@ -54,7 +54,7 @@ import {
   sendErrorMessage,
   sendChatHistoryResponse,
 } from './chatroom-client.js';
-import { sanitizeSlashArg, sanitizeChatArg, getDisplayText } from './utils.js';
+import { sanitizeSlashArg, sanitizeChatArg, getDisplayText, getCurrentChatId } from './utils.js';
 import { computeHash } from './hash-utils.js';
 import { sendLastMessageImages, extractImageSrcsFromMesText } from './image-relay.js';
 import {
@@ -415,11 +415,7 @@ export async function handleUserMessage(data) {
     // Auto-Generation-Plugin gingen verloren sobald data.chatId undefined war.
     const ctx = SillyTavern.getContext();
     if (!messageState.chatId) {
-      messageState.chatId =
-        (typeof ctx.getCurrentChatId === 'function' ? ctx.getCurrentChatId() : null) ??
-        ctx.chat_metadata?.chat_id ??
-        ctx.chat_metadata?.chatId ??
-        'nochat';
+      messageState.chatId = getCurrentChatId(ctx) ?? 'nochat';
       console.debug('[CharacterBridge] collectAndSendReplies chatId-Fallback', {
         resolved: messageState.chatId,
       });
@@ -537,12 +533,7 @@ export async function handleUserMessage(data) {
   // a polling-bubble candidate and may swallow a finalized greeting.
   const onGenerationStarted = () => {
     const ctx = SillyTavern.getContext();
-    const chatIdSafe =
-      messageState.chatId ??
-      (typeof ctx.getCurrentChatId === 'function' ? ctx.getCurrentChatId() : null) ??
-      ctx.chat_metadata?.chat_id ??
-      ctx.chat_metadata?.chatId ??
-      'nochat';
+    const chatIdSafe = messageState.chatId ?? getCurrentChatId(ctx) ?? 'nochat';
     currentStreamId = `${chatIdSafe}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
     currentCharacterName = ctx.groupId ? ctx.name2 || null : null;
     lastSentLength = 0;       // reset visible-delta baseline for each new stream
@@ -787,13 +778,9 @@ export async function handleExecuteCommand(data) {
         }));
 
         // chat_id Fallback: data.chatId fehlt typischerweise weil das Server-
-        // command-Packet kein chatId-Feld hat. Nutze stattdessen ST's eigene
-        // getCurrentChatId() um den aktiven Chat zu identifizieren.
+        // command-Packet kein chatId-Feld hat. Nutze den geteilten Helper.
         const ctx = SillyTavern.getContext();
-        const chatId = data.chatId
-          ?? ctx.getCurrentChatId?.()
-          ?? ctx.chat_metadata?.chat_id
-          ?? null;
+        const chatId = data.chatId ?? getCurrentChatId(ctx);
 
         sendChatHistoryResponse(chatId, messages, true);
         // KEINE replyText-Bubble — User wollte das nur als console.debug.

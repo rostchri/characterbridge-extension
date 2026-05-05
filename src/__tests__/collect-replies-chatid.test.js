@@ -22,9 +22,11 @@
 
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import { getCurrentChatId } from '../utils.js';
 
 // ---------------------------------------------------------------------------
 // Inline-Replik der chatId-Fallback-Logik aus collectAndSendReplies
+// Nutzt jetzt getCurrentChatId() aus utils.js (#1918 — shared helper).
 // ---------------------------------------------------------------------------
 
 /**
@@ -36,11 +38,7 @@ import assert from 'node:assert/strict';
  */
 function resolveChatId(messageState, ctx) {
   if (!messageState.chatId) {
-    messageState.chatId =
-      (typeof ctx.getCurrentChatId === 'function' ? ctx.getCurrentChatId() : null) ??
-      ctx.chat_metadata?.chat_id ??
-      ctx.chat_metadata?.chatId ??
-      'nochat';
+    messageState.chatId = getCurrentChatId(ctx) ?? 'nochat';
   }
   return messageState.chatId;
 }
