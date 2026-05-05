@@ -213,15 +213,17 @@ export async function handleUserMessage(data) {
     }
 
     // Determine whether we are currently inside an open <think> block.
-    // Tolerate optional leading whitespace before <think>.
-    const openIdx = cumulativeText.search(/^\s*<think>/);
-    const inThinkingMode = openIdx !== -1 && !thinkingClosed;
+    // indexOf is used instead of /^\s*<think>/ because the tag may be preceded
+    // by a leading token (e.g. a BOS marker or whitespace that is not at the
+    // very start of the string), which the ^ anchor would silently skip (#1879).
+    const thinkOpenIdx = cumulativeText.indexOf('<think>');
+    const inThinkingMode = thinkOpenIdx !== -1 && !thinkingClosed;
 
     let newPart = '';
 
     if (inThinkingMode) {
       // Locate the actual start of content (after "<think>")
-      const tagEnd = cumulativeText.indexOf('<think>') + '<think>'.length;
+      const tagEnd = thinkOpenIdx + '<think>'.length;
       const closeIdx = cumulativeText.indexOf('</think>');
 
       if (closeIdx !== -1) {
@@ -286,7 +288,7 @@ export async function handleUserMessage(data) {
     console.debug('[CharacterBridge:stream]', {
       streamId: currentStreamId,
       ts: Date.now(),
-      thinkingMode: !thinkingClosed && cumulativeText.search(/^\s*<think>/) !== -1,
+      thinkingMode: inThinkingMode,
       cumulativeLen: cumulativeText.length,
       newPartLen: newPart.length,
       preview: newPart.slice(0, 60),

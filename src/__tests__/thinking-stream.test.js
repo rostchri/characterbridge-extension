@@ -50,11 +50,13 @@ function simulateThinkingStream(snapshots) {
   const visibleDeltas = [];
 
   for (const cumulativeText of snapshots) {
-    const openIdx = cumulativeText.search(/^\s*<think>/);
-    const inThinkingMode = openIdx !== -1 && !thinkingClosed;
+    // indexOf instead of /^\s*<think>/ — the tag may be preceded by a leading
+    // token (BOS marker, whitespace not at position 0) which ^ would miss (#1879).
+    const thinkOpenIdx = cumulativeText.indexOf('<think>');
+    const inThinkingMode = thinkOpenIdx !== -1 && !thinkingClosed;
 
     if (inThinkingMode) {
-      const tagEnd = cumulativeText.indexOf('<think>') + '<think>'.length;
+      const tagEnd = thinkOpenIdx + '<think>'.length;
       const closeIdx = cumulativeText.indexOf('</think>');
 
       if (closeIdx !== -1) {
@@ -190,14 +192,21 @@ describe('streamCallback — thinking-aware delta logic', () => {
     assert.deepEqual(visibleDeltas, ['A', 'B', 'C']);
   });
 
-  it('fuehrendes Whitespace vor <think> wird toleriert', () => {
-    // openIdx via search(/^\s*<think>/) — ein Newline vor dem Tag
+  it('fuehrendes Whitespace vor <think> wird toleriert (#1879)', () => {
+    // indexOf('<think>') erkennt den Tag auch nach Whitespace.
     const snapshots = ['\n<think>thinking</think>response'];
     const { thinkingDeltas, visibleDeltas } = simulateThinkingStream(snapshots);
-    // tagEnd richtet sich nach indexOf('<think>'), nicht openIdx
     assert.deepEqual(thinkingDeltas, ['thinking']);
-    // postThink nach </think> hat kein trimStart-Problem
     assert.deepEqual(visibleDeltas, ['response']);
+  });
+
+  it('prefixed Token vor <think> wird erkannt (#1879)', () => {
+    // Modelle wie Gemma geben manchmal ein BOS-Token vor dem <think>-Tag aus.
+    // /^\s*<think>/ wuerde diesen Fall verpassen; indexOf('<think>') findet es.
+    const snapshots = ['<bos><think>reasoning</think>answer'];
+    const { thinkingDeltas, visibleDeltas } = simulateThinkingStream(snapshots);
+    assert.deepEqual(thinkingDeltas, ['reasoning'], 'Thinking-Delta trotz BOS-Prefix erkannt');
+    assert.deepEqual(visibleDeltas, ['answer'], 'Visible-Delta korrekt nach </think>');
   });
 
   it('stream ohne Thinking — regression-fallback greift bei verkuerztem visible', () => {
