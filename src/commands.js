@@ -24,6 +24,11 @@
  *   STREAM_TOKEN_RECEIVED forwards cumulative text to the bridge for throttled
  *   display. GENERATION_ENDED sends stream_end with the final text and charName.
  *   Group chats include the character name; solo chats do not.
+ *
+ *   setupStreamingPipeline(messageState) kapselt die gesamte Listener-Registrierung
+ *   und Cleanup-Logik. Wird von handleUserMessage und handleExecuteCommand
+ *   case "continue" genutzt damit beide Pfade vollstaendige Streaming-Events
+ *   (stream_chunk, stream_end, stream_thinking) an den Controller liefern.
  */
 
 import {
@@ -106,53 +111,32 @@ function getActiveCharName() {
 }
 
 // ---------------------------------------------------------------------------
-// handleUserMessage
+// setupStreamingPipeline
 // ---------------------------------------------------------------------------
 
 /**
- * Handles user_message: injects the text into ST, hooks generation lifecycle
- * events to stream tokens to the bridge, and sends the final reply.
+ * Registers all six SillyTavern event listeners needed to stream a generation
+ * turn to the Chatroom Controller (STREAM_TOKEN_RECEIVED, STREAM_REASONING_DONE,
+ * GENERATION_STARTED, GENERATION_ENDED, GROUP_WRAPPER_FINISHED,
+ * GENERATION_STOPPED).
  *
- * All event listeners are registered here and removed in every exit path
- * (normal completion, user stop, error) to prevent leaks across sessions.
+ * This function is called by both handleUserMessage and handleExecuteCommand
+ * case "continue" so that /continue generates the same stream_chunk /
+ * stream_end / stream_thinking packets as a normal user-message turn.
  *
- * CharacterBridge protocol additions:
- * - stream_chunk includes charName
- * - stream_end includes charName and finalText
- * - ai_reply includes charName
- * - Supports persona field for user identity switching
+ * Cleanup contract:
+ *   - cleanup() removes all six listeners and stops the delayed-image observer.
+ *     It is idempotent: removeListener on a non-registered handler is a no-op.
+ *   - Normal generation: onGenerationEnded / onGroupFinished call cleanup()
+ *     internally, so the caller does NOT need to call cleanup() again on the
+ *     happy path.
+ *   - Error / abort path: the caller MUST call cleanup() + flushStreamEnd() in
+ *     its catch block (defensively) because onGenerationEnded may not fire.
+ *
+ * @param {{ chatId: string|undefined, isStreaming: boolean, streamedAny: boolean }} messageState
+ * @returns {{ cleanup: () => void, flushStreamEnd: () => void, getMessageState: () => typeof messageState }}
  */
-export async function handleUserMessage(data) {
-  sharedState.lastActiveChatId = data.chatId || sharedState.lastActiveChatId;
-
-  // Auto-switch persona if provided in the message
-  if (data.persona) {
-    try {
-      await executeSlashCommandsWithOptions(
-        `/persona-set ${sanitizeSlashArg(data.persona)}`,
-      );
-    } catch (err) {
-      console.warn(
-        `[CharacterBridge] Failed to switch persona to "${data.persona}":`,
-        err,
-      );
-    }
-  }
-
-  const messageState = {
-    chatId: data.chatId,
-    isStreaming: false,
-    streamedAny: false,
-  };
-
-  sendTypingAction(getActiveCharName(), true, messageState.chatId);
-
-  const userText =
-    typeof data.text === 'string'
-      ? data.text.slice(0, MAX_USER_MESSAGE_LENGTH)
-      : String(data.text ?? '').slice(0, MAX_USER_MESSAGE_LENGTH);
-  await sendMessageAsUser(userText);
-
+function setupStreamingPipeline(messageState) {
   let currentStreamId = null;
   let currentCharacterName = null;
   // Tracks the number of visible characters already sent so we can derive
@@ -543,7 +527,7 @@ export async function handleUserMessage(data) {
   };
   eventSource.on(event_types.GENERATION_STARTED, onGenerationStarted);
 
-  const removeAllListeners = () => {
+  const cleanup = () => {
     eventSource.removeListener(
       event_types.STREAM_TOKEN_RECEIVED,
       streamCallback,
@@ -560,7 +544,7 @@ export async function handleUserMessage(data) {
       onGenerationStopped,
     );
     // Stop any pending delayed-image observer when the session ends or a new
-    // user turn starts (MESSAGE_SENT triggers removeAllListeners indirectly via
+    // user turn starts (MESSAGE_SENT triggers cleanup indirectly via
     // the next handleUserMessage call which calls stopDelayedImageObserver()).
     stopDelayedImageObserver();
   };
@@ -570,7 +554,7 @@ export async function handleUserMessage(data) {
   const onGenerationEnded = () => {
     flushStreamEnd();
     if (!SillyTavern.getContext().groupId) {
-      removeAllListeners();
+      cleanup();
       collectAndSendReplies();
     }
   };
@@ -578,19 +562,77 @@ export async function handleUserMessage(data) {
 
   // Fires once after all group members have finished generating.
   const onGroupFinished = () => {
-    removeAllListeners();
+    cleanup();
     collectAndSendReplies();
   };
   eventSource.on(GROUP_WRAPPER_FINISHED, onGroupFinished);
 
   // User aborted - clean up without sending a reply.
-  // removeAllListeners() already de-registers GENERATION_STOPPED, so no
+  // cleanup() already de-registers GENERATION_STOPPED, so no
   // extra removeListener call here — avoids the double-removal (#1886).
   const onGenerationStopped = () => {
-    removeAllListeners();
+    cleanup();
     flushStreamEnd();
   };
   eventSource.on(event_types.GENERATION_STOPPED, onGenerationStopped);
+
+  return {
+    cleanup,
+    flushStreamEnd,
+    getMessageState: () => messageState,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// handleUserMessage
+// ---------------------------------------------------------------------------
+
+/**
+ * Handles user_message: injects the text into ST, hooks generation lifecycle
+ * events to stream tokens to the bridge, and sends the final reply.
+ *
+ * All event listeners are registered via setupStreamingPipeline and removed
+ * in every exit path (normal completion, user stop, error) to prevent leaks
+ * across sessions.
+ *
+ * CharacterBridge protocol additions:
+ * - stream_chunk includes charName
+ * - stream_end includes charName and finalText
+ * - ai_reply includes charName
+ * - Supports persona field for user identity switching
+ */
+export async function handleUserMessage(data) {
+  sharedState.lastActiveChatId = data.chatId || sharedState.lastActiveChatId;
+
+  // Auto-switch persona if provided in the message
+  if (data.persona) {
+    try {
+      await executeSlashCommandsWithOptions(
+        `/persona-set ${sanitizeSlashArg(data.persona)}`,
+      );
+    } catch (err) {
+      console.warn(
+        `[CharacterBridge] Failed to switch persona to "${data.persona}":`,
+        err,
+      );
+    }
+  }
+
+  const messageState = {
+    chatId: data.chatId,
+    isStreaming: false,
+    streamedAny: false,
+  };
+
+  sendTypingAction(getActiveCharName(), true, messageState.chatId);
+
+  const userText =
+    typeof data.text === 'string'
+      ? data.text.slice(0, MAX_USER_MESSAGE_LENGTH)
+      : String(data.text ?? '').slice(0, MAX_USER_MESSAGE_LENGTH);
+  await sendMessageAsUser(userText);
+
+  const pipeline = setupStreamingPipeline(messageState);
 
   try {
     const abortController = new AbortController();
@@ -600,8 +642,8 @@ export async function handleUserMessage(data) {
     console.error("[CharacterBridge] Generation error:", error);
     await deleteLastMessage();
     sendErrorMessage(`Generation failed: ${error.message || 'Unknown'}`, messageState.chatId);
-    removeAllListeners();
-    flushStreamEnd();
+    pipeline.cleanup();
+    pipeline.flushStreamEnd();
   }
 }
 
@@ -739,9 +781,29 @@ export async function handleExecuteCommand(data) {
         const rawHint = sanitizeSlashArg(data.args?.[0] ?? "");
         const hint = rawHint.replace(/=/g, " ").trim();
         const cmd = hint ? `/continue ${hint}` : "/continue";
-        // Await and propagate errors so the outer catch block can report them
-        // back to the user (#1882 — silent rescue suppressed user-visible feedback).
-        await executeSlashCommandsWithOptions(cmd);
+
+        // Register streaming listeners so ST's generation events produce
+        // stream_chunk / stream_end / stream_thinking packets — identical
+        // to the handleUserMessage path. Without this, /continue runs
+        // silently: no TTS, no Karaoke, no Live-UI-Updates (#1903).
+        const continueMessageState = {
+          chatId: data.chatId ?? sharedState.lastActiveChatId,
+          isStreaming: false,
+          streamedAny: false,
+        };
+        const continuePipeline = setupStreamingPipeline(continueMessageState);
+        try {
+          // Await and propagate errors so the outer catch block can report
+          // them back to the user (#1882 — silent rescue suppressed
+          // user-visible feedback).
+          await executeSlashCommandsWithOptions(cmd);
+        } catch (error) {
+          // Defensive cleanup if onGenerationEnded did not fire (e.g. ST
+          // threw before generation started). cleanup() is idempotent.
+          continuePipeline.cleanup();
+          continuePipeline.flushStreamEnd();
+          throw error;
+        }
         break;
       }
 
