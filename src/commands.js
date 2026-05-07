@@ -728,9 +728,20 @@ export async function handleExecuteCommand(data) {
       }
 
       case "continue": {
+        // Optional hint argument (data.args[0]) is appended to /continue
+        // and treated by ST's slash parser as the positional prompt — see
+        // ST slash-commands.js help: "/continue await=true <prompt>".
+        //
+        // sanitizeSlashArg strips pipe/newlines and length-caps at 200.
+        // Additionally we strip "=" so hints like "await=false foo" cannot
+        // hijack ST's named-argument parser; the whole hint is meant as
+        // free-text prompt, not flag overrides.
+        const rawHint = sanitizeSlashArg(data.args?.[0] ?? "");
+        const hint = rawHint.replace(/=/g, " ").trim();
+        const cmd = hint ? `/continue ${hint}` : "/continue";
         // Await and propagate errors so the outer catch block can report them
         // back to the user (#1882 — silent rescue suppressed user-visible feedback).
-        await executeSlashCommandsWithOptions("/continue");
+        await executeSlashCommandsWithOptions(cmd);
         break;
       }
 
