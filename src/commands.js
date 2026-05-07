@@ -520,10 +520,46 @@ function setupStreamingPipeline(messageState) {
     const chatIdSafe = messageState.chatId ?? getCurrentChatId(ctx) ?? 'nochat';
     currentStreamId = `${chatIdSafe}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
     currentCharacterName = ctx.groupId ? ctx.name2 || null : null;
-    lastSentLength = 0;       // reset visible-delta baseline for each new stream
-    thinkingSentLength = 0;   // reset thinking-delta baseline
-    thinkingClosed = false;   // reset thinking-block state
-    lastReasoningSent = '';   // reset live-reasoning-polling baseline
+
+    // Continue-Mode baseline: bei /continue erweitert ST den bestehenden
+    // chat[lastIdx].mes Text. STREAM_TOKEN_RECEIVED feuert mit cumulativeText
+    // = preContent + neue Tokens. Bei lastSentLength=0 wuerde der gesamte
+    // preContent als erstes Delta gesendet — die UI rendert dadurch den
+    // bestehenden Text doppelt (oben preContent, unten LiveStreamingText
+    // mit demselben Text). Fix: lastSentLength auf die Laenge des visible
+    // preContent setzen, damit nur die NEUEN Tokens als Delta rausgehen.
+    // Analog fuer thinkingSentLength wenn ein <think>-Block bereits
+    // existiert (selten — meist nutzt ST extra.reasoning fuer Continue).
+    let baseVisibleLen = 0;
+    let baseThinkingLen = 0;
+    if (messageState.isContinue) {
+      try {
+        const chat = ctx.chat;
+        if (chat?.length) {
+          const lastMsg = chat[chat.length - 1];
+          if (lastMsg && !lastMsg.is_user) {
+            const displayed = getDisplayText(lastMsg);
+            if (displayed) {
+              const split = resolveThinking(displayed.trim(), lastMsg.extra);
+              baseVisibleLen = (split.visible ?? '').length;
+              baseThinkingLen = (split.thinking ?? '').length;
+            }
+          }
+        }
+        console.debug('[CharacterBridge:continue_baseline]', {
+          streamId: currentStreamId,
+          baseVisibleLen,
+          baseThinkingLen,
+        });
+      } catch (err) {
+        console.warn('[CharacterBridge] continue baseline detect failed:', err);
+      }
+    }
+
+    lastSentLength = baseVisibleLen;       // visible-delta baseline
+    thinkingSentLength = baseThinkingLen;  // thinking-delta baseline
+    thinkingClosed = false;                // reset thinking-block state
+    lastReasoningSent = '';                // reset live-reasoning-polling baseline
   };
   eventSource.on(event_types.GENERATION_STARTED, onGenerationStarted);
 
@@ -790,6 +826,11 @@ export async function handleExecuteCommand(data) {
           chatId: data.chatId ?? sharedState.lastActiveChatId,
           isStreaming: false,
           streamedAny: false,
+          // Markiert die Pipeline als /continue-Pfad. onGenerationStarted
+          // berechnet daraufhin lastSentLength/thinkingSentLength aus dem
+          // bestehenden chat[lastIdx].mes, damit STREAM_TOKEN_RECEIVED-
+          // Cumulative-Text nicht den preContent als Delta sendet (#1909).
+          isContinue: true,
         };
         const continuePipeline = setupStreamingPipeline(continueMessageState);
         try {
