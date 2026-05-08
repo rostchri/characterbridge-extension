@@ -37,7 +37,7 @@ function newExternalStreamId() {
   return `${EXTERNAL_STREAM_PREFIX}${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
-function buildListStCharactersResponse(ctx, requestId) {
+function buildListStCharactersResponse(ctx, ref) {
   const characters = (ctx.characters || []).map((c, idx) => ({
     id: String(c.avatar ?? idx),
     name: c.name ?? '',
@@ -49,7 +49,7 @@ function buildListStCharactersResponse(ctx, requestId) {
   }));
   return {
     type: 'list_st_characters_response',
-    request_id: requestId ?? null,
+    ref: ref ?? null,
     characters,
   };
 }
@@ -76,28 +76,35 @@ function validateSetupExternalCharacter(ctx, charName) {
   };
 }
 
-function buildSetupOk(charName, groupId, character, requestId) {
+function buildSetupResultOk({ ref, sessionId, charName, groupId, groupChatId, character, rpHint, warnings = [] }) {
   return {
-    type: 'setup_external_character_ok',
-    request_id: requestId ?? null,
+    type: 'setup_external_character_result',
+    ref: ref ?? null,
+    ok: true,
+    session_id: sessionId ?? '',
     char_name: charName,
     group_id: groupId,
-    character: {
-      avatar: character.avatar ?? null,
-      avatar_url: character.avatar ? `/characters/${character.avatar}` : null,
-      description: character.description ?? '',
-      scenario: character.scenario ?? '',
-      personality: character.personality ?? '',
-      first_mes: character.first_mes ?? '',
-    },
+    group_chat_id: groupChatId ?? '',
+    description: character?.description ?? '',
+    rp_hint: rpHint ?? '',
+    warnings,
+    error: null,
   };
 }
 
-function buildSetupError(reason, requestId) {
+function buildSetupResultError({ ref, sessionId, charName, error }) {
   return {
-    type: 'setup_external_character_error',
-    request_id: requestId ?? null,
-    reason,
+    type: 'setup_external_character_result',
+    ref: ref ?? null,
+    ok: false,
+    session_id: sessionId ?? '',
+    char_name: charName ?? '',
+    group_id: null,
+    group_chat_id: '',
+    description: '',
+    rp_hint: '',
+    warnings: [],
+    error: error ?? 'unknown',
   };
 }
 
@@ -133,7 +140,7 @@ function buildSynthStreamEnd(charName, text, streamId) {
 // ---------------------------------------------------------------------------
 
 describe('buildListStCharactersResponse', () => {
-  it('shapes characters and passes request_id through', () => {
+  it('shapes characters and passes ref through', () => {
     const ctx = {
       characters: [
         {
@@ -148,10 +155,10 @@ describe('buildListStCharactersResponse', () => {
       ],
     };
 
-    const reply = buildListStCharactersResponse(ctx, 'req-1');
+    const reply = buildListStCharactersResponse(ctx, 'ref-1');
 
     assert.equal(reply.type, 'list_st_characters_response');
-    assert.equal(reply.request_id, 'req-1');
+    assert.equal(reply.ref, 'ref-1');
     assert.equal(reply.characters.length, 2);
     assert.equal(reply.characters[0].name, 'Alice');
     assert.equal(reply.characters[0].id, 'alice.png');
@@ -163,7 +170,7 @@ describe('buildListStCharactersResponse', () => {
   it('handles empty characters list', () => {
     const reply = buildListStCharactersResponse({ characters: [] }, null);
     assert.equal(reply.characters.length, 0);
-    assert.equal(reply.request_id, null);
+    assert.equal(reply.ref, null);
   });
 
   it('falls back to index when avatar missing', () => {
@@ -237,36 +244,67 @@ describe('validateSetupExternalCharacter', () => {
   });
 });
 
-describe('buildSetupOk', () => {
-  it('builds full ok packet with avatar_url', () => {
-    const ok = buildSetupOk(
-      'Alice',
-      'g1',
-      { avatar: 'alice.png', description: 'd', scenario: 's', personality: 'p', first_mes: 'f' },
-      'req-1',
-    );
-    assert.equal(ok.type, 'setup_external_character_ok');
-    assert.equal(ok.request_id, 'req-1');
+describe('buildSetupResultOk', () => {
+  it('builds setup_external_character_result with ok:true and all fields', () => {
+    const ok = buildSetupResultOk({
+      ref: 'r-1',
+      sessionId: 's-1',
+      charName: 'Alice',
+      groupId: 'g1',
+      groupChatId: 'gc-1',
+      character: { avatar: 'alice.png', description: 'd' },
+      rpHint: 'be brave',
+    });
+    assert.equal(ok.type, 'setup_external_character_result');
+    assert.equal(ok.ref, 'r-1');
+    assert.equal(ok.ok, true);
+    assert.equal(ok.session_id, 's-1');
     assert.equal(ok.char_name, 'Alice');
     assert.equal(ok.group_id, 'g1');
-    assert.equal(ok.character.avatar_url, '/characters/alice.png');
-    assert.equal(ok.character.description, 'd');
+    assert.equal(ok.group_chat_id, 'gc-1');
+    assert.equal(ok.description, 'd');
+    assert.equal(ok.rp_hint, 'be brave');
+    assert.deepEqual(ok.warnings, []);
+    assert.equal(ok.error, null);
   });
 
-  it('handles char without avatar', () => {
-    const ok = buildSetupOk('NoAv', 'g1', {}, null);
-    assert.equal(ok.character.avatar, null);
-    assert.equal(ok.character.avatar_url, null);
-    assert.equal(ok.character.description, '');
+  it('handles missing rpHint and warnings', () => {
+    const ok = buildSetupResultOk({
+      sessionId: 's',
+      charName: 'X',
+      groupId: 'g',
+      character: {},
+    });
+    assert.equal(ok.rp_hint, '');
+    assert.deepEqual(ok.warnings, []);
+    assert.equal(ok.description, '');
   });
 });
 
-describe('buildSetupError', () => {
-  it('preserves request_id and reason', () => {
-    const err = buildSetupError('not_in_group_chat', 'r1');
-    assert.equal(err.type, 'setup_external_character_error');
-    assert.equal(err.reason, 'not_in_group_chat');
-    assert.equal(err.request_id, 'r1');
+describe('buildSetupResultError', () => {
+  it('builds error result with ok:false and error string', () => {
+    const err = buildSetupResultError({
+      ref: 'r-1',
+      sessionId: 's-1',
+      charName: 'Alice',
+      error: 'not_in_group_chat',
+    });
+    assert.equal(err.type, 'setup_external_character_result');
+    assert.equal(err.ref, 'r-1');
+    assert.equal(err.ok, false);
+    assert.equal(err.session_id, 's-1');
+    assert.equal(err.char_name, 'Alice');
+    assert.equal(err.error, 'not_in_group_chat');
+    assert.equal(err.group_id, null);
+    assert.equal(err.group_chat_id, '');
+    assert.deepEqual(err.warnings, []);
+  });
+
+  it('defaults to unknown error and empty fields', () => {
+    const err = buildSetupResultError({});
+    assert.equal(err.error, 'unknown');
+    assert.equal(err.session_id, '');
+    assert.equal(err.char_name, '');
   });
 });
 

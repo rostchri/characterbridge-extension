@@ -46,7 +46,7 @@ export function newExternalStreamId() {
 // Pure Builders — ohne ST-Globals, einfach testbar
 // ---------------------------------------------------------------------------
 
-export function buildListStCharactersResponse(ctx, requestId) {
+export function buildListStCharactersResponse(ctx, ref) {
   const characters = (ctx.characters || []).map((c, idx) => ({
     id: String(c.avatar ?? idx),
     name: c.name ?? '',
@@ -58,7 +58,7 @@ export function buildListStCharactersResponse(ctx, requestId) {
   }));
   return {
     type: 'list_st_characters_response',
-    request_id: requestId ?? null,
+    ref: ref ?? null,
     characters,
   };
 }
@@ -94,28 +94,40 @@ export function validateSetupExternalCharacter(ctx, charName) {
   };
 }
 
-export function buildSetupOk(charName, groupId, character, requestId) {
+/**
+ * Setup-Result-Packet (vereinheitlicht ok+error, Spec Backend packet_router).
+ * Felder: ok, session_id, char_name, group_chat_id, group_id, description,
+ * rp_hint, warnings[], error.
+ */
+export function buildSetupResultOk({ ref, sessionId, charName, groupId, groupChatId, character, rpHint, warnings = [] }) {
   return {
-    type: 'setup_external_character_ok',
-    request_id: requestId ?? null,
+    type: 'setup_external_character_result',
+    ref: ref ?? null,
+    ok: true,
+    session_id: sessionId ?? '',
     char_name: charName,
     group_id: groupId,
-    character: {
-      avatar: character.avatar ?? null,
-      avatar_url: character.avatar ? `/characters/${character.avatar}` : null,
-      description: character.description ?? '',
-      scenario: character.scenario ?? '',
-      personality: character.personality ?? '',
-      first_mes: character.first_mes ?? '',
-    },
+    group_chat_id: groupChatId ?? '',
+    description: character?.description ?? '',
+    rp_hint: rpHint ?? '',
+    warnings,
+    error: null,
   };
 }
 
-export function buildSetupError(reason, requestId) {
+export function buildSetupResultError({ ref, sessionId, charName, error }) {
   return {
-    type: 'setup_external_character_error',
-    request_id: requestId ?? null,
-    reason,
+    type: 'setup_external_character_result',
+    ref: ref ?? null,
+    ok: false,
+    session_id: sessionId ?? '',
+    char_name: charName ?? '',
+    group_id: null,
+    group_chat_id: '',
+    description: '',
+    rp_hint: '',
+    warnings: [],
+    error: error ?? 'unknown',
   };
 }
 
@@ -159,16 +171,20 @@ export function buildSynthStreamEnd(charName, text, streamId) {
 
 export function handleListStCharacters(packet) {
   const ctx = SillyTavern.getContext();
-  send(buildListStCharactersResponse(ctx, packet.request_id));
+  send(buildListStCharactersResponse(ctx, packet.ref));
 }
 
 export async function handleSetupExternalCharacter(packet) {
   const charName = (packet.char_name ?? '').trim();
+  const sessionId = packet.session_id ?? '';
+  const ref = packet.ref ?? null;
+  const rpHint = packet.rp_hint ?? '';
+
   const ctx = SillyTavern.getContext();
   const v = validateSetupExternalCharacter(ctx, charName);
 
   if (!v.ok) {
-    send(buildSetupError(v.reason, packet.request_id));
+    send(buildSetupResultError({ ref, sessionId, charName, error: v.reason }));
     return;
   }
 
@@ -179,10 +195,27 @@ export async function handleSetupExternalCharacter(packet) {
       await executeSlashCommandsWithOptions(`/memberadd ${safeName}`);
     }
     await executeSlashCommandsWithOptions(`/groupmember-disable ${safeName}`);
-    send(buildSetupOk(charName, ctx.groupId, v.character, packet.request_id));
+    send(
+      buildSetupResultOk({
+        ref,
+        sessionId,
+        charName,
+        groupId: ctx.groupId,
+        groupChatId: ctx.chatId ?? '',
+        character: v.character,
+        rpHint,
+      }),
+    );
   } catch (err) {
     console.error('[CharacterBridge/external] setup failed:', err);
-    send(buildSetupError(`slash_command_failed:${err?.message ?? 'unknown'}`, packet.request_id));
+    send(
+      buildSetupResultError({
+        ref,
+        sessionId,
+        charName,
+        error: `slash_command_failed:${err?.message ?? 'unknown'}`,
+      }),
+    );
   }
 }
 
@@ -226,20 +259,7 @@ export async function handleExternalCharacterMessage(packet) {
   send(buildSynthStreamEnd(charName, text, streamId));
 }
 
-export async function handleMoveOutOfSt(packet) {
-  const charName = (packet.char_name ?? '').trim();
-  if (!charName) {
-    send({
-      type: 'move_out_of_st_error',
-      request_id: packet.request_id ?? null,
-      reason: 'missing_char_name',
-    });
-    return;
-  }
-
-  send({
-    type: 'move_out_of_st_ok',
-    request_id: packet.request_id ?? null,
-    char_name: charName,
-  });
-}
+// move_out_of_st ist rein backend-seitig — der Chatroom-Controller updated
+// AgentBridgeState ohne die Bridge zu involvieren. cb-fork muss daher kein
+// Packet handhaben. Sollte das spaeter aenderungen (z.B. /groupmember-enable
+// beim Move-Out), kann hier ein Handler nachgereicht werden.

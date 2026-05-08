@@ -72,7 +72,6 @@ import {
   handleListStCharacters,
   handleSetupExternalCharacter,
   handleExternalCharacterMessage,
-  handleMoveOutOfSt,
 } from './src/external_character.js';
 import {
   collectInventory,
@@ -150,10 +149,6 @@ onMessage(async (packet) => {
 
       case 'external_character_message':
         await handleExternalCharacterMessage(packet);
-        break;
-
-      case 'move_out_of_st':
-        await handleMoveOutOfSt(packet);
         break;
 
       default:
