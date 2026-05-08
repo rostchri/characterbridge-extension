@@ -69,6 +69,12 @@ import {
   handleExecuteCommand,
 } from './src/commands.js';
 import {
+  handleListStCharacters,
+  handleSetupExternalCharacter,
+  handleExternalCharacterMessage,
+  handleMoveOutOfSt,
+} from './src/external_character.js';
+import {
   collectInventory,
   startInventoryWatcher,
   stopInventoryWatcher,
@@ -131,6 +137,23 @@ onMessage(async (packet) => {
       case 'system_command':
         if (packet.command === 'reload_ui_only')
           setTimeout(() => window.location.reload(), 500);
+        break;
+
+      // Phase 2 — Mit-Spieler-Modus (External-Character)
+      case 'list_st_characters_request':
+        handleListStCharacters(packet);
+        break;
+
+      case 'setup_external_character':
+        await handleSetupExternalCharacter(packet);
+        break;
+
+      case 'external_character_message':
+        await handleExternalCharacterMessage(packet);
+        break;
+
+      case 'move_out_of_st':
+        await handleMoveOutOfSt(packet);
         break;
 
       default:
