@@ -11,7 +11,7 @@
  *   1. ST-Group-Chat MUSS aktiv sein (Solo-Mode unzulaessig).
  *   2. Char-Card wird via /memberadd dem Group hinzugefuegt — sofern noch nicht
  *      Member.
- *   3. Char-Card wird via /groupmember-disable stumm geschaltet, sodass ST
+ *   3. Char-Card wird via /member-disable stumm geschaltet, sodass ST
  *      diesen Member NIEMALS automatisch generiert. Der Claude-Agent ist die
  *      einzige Schreibinstanz.
  *   4. Bei {type:"external_character_message"} wird der Text als nicht-
@@ -192,9 +192,9 @@ export async function handleSetupExternalCharacter(packet) {
 
   try {
     if (!v.isMember) {
-      await executeSlashCommandsWithOptions(`/memberadd ${safeName}`);
+      await executeSlashCommandsWithOptions(`/member-add ${safeName}`);
     }
-    await executeSlashCommandsWithOptions(`/groupmember-disable ${safeName}`);
+    await executeSlashCommandsWithOptions(`/member-disable ${safeName}`);
     send(
       buildSetupResultOk({
         ref,
