@@ -31,7 +31,12 @@
  *   verbinden sie nur mit eventSource/saveChat/slash-commands.
  */
 
-import { eventSource, event_types, saveChatConditional } from '../../../../../script.js';
+import {
+  eventSource,
+  event_types,
+  saveChatConditional,
+  addOneMessage,
+} from '../../../../../script.js';
 import { executeSlashCommandsWithOptions } from '../../../../../scripts/slash-commands.js';
 import { send } from './chatroom-client.js';
 import { sanitizeSlashArg } from './utils.js';
@@ -247,9 +252,15 @@ export async function handleExternalCharacterMessage(packet) {
   const message = buildExternalChatMessage(charName, text, streamId, avatarUrl);
 
   try {
+    // ST-Pattern aus group-chats.js (~Z.299): chat.push → MESSAGE_RECEIVED →
+    // addOneMessage → CHARACTER_MESSAGE_RENDERED → saveChatConditional.
+    // KRITISCH: addOneMessage rendered die Bubble in den DOM. Ohne das ist
+    // die Message nur in chat[] und unsichtbar in der UI.
     ctx.chat.push(message);
-    eventSource.emit(event_types.MESSAGE_RECEIVED, ctx.chat.length - 1);
-    eventSource.emit(event_types.CHARACTER_MESSAGE_RENDERED, ctx.chat.length - 1);
+    const idx = ctx.chat.length - 1;
+    await eventSource.emit(event_types.MESSAGE_RECEIVED, idx);
+    addOneMessage(message);
+    await eventSource.emit(event_types.CHARACTER_MESSAGE_RENDERED, idx);
     await saveChatConditional();
   } catch (err) {
     console.error('[CharacterBridge/external] failed to inject message:', err);
